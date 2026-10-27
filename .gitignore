@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test images / generated files
+WhatsApp Image *.jpeg
+WhatsApp Image *.jpg
+WhatsApp Image *.png
+
+# Python generated files
+*.pyc
+
+# Attendance/generated output
+output/
+uploads/
+captured_faces/
+
+# Local databases / temporary files
+*.db
+*.sqlite
+
+# Additional frontend build output
+frontend/build/
+
+# Python environment and cache directories
+**/.venv/
+**/venv/
+**/__pycache__/
+
+# Private keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local configuration and data
+*.log.*
+*.bak
+*.dump
+*.backup
