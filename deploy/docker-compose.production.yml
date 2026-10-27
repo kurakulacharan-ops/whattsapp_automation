@@ -1,10 +1,11 @@
 name: attendance
 
 x-backend: &backend
-  build:
-    context: ..
-    dockerfile: deploy/Dockerfile.backend
-  env_file: ../backend/.env
+  image: ${IMAGE_PREFIX:-ghcr.io/kurakulacharan-ops/whattsapp_automation}-backend:${IMAGE_TAG:?Set IMAGE_TAG to the published sha tag}
+  platform: linux/amd64
+  env_file: ./runtime.env
+  volumes:
+    - face-models:/root/.insightface
   environment: &backend-environment
     ENVIRONMENT: production
     DB_BACKEND: mssql
@@ -52,9 +53,8 @@ services:
         condition: service_healthy
 
   frontend:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.frontend
+    image: ${IMAGE_PREFIX:-ghcr.io/kurakulacharan-ops/whattsapp_automation}-frontend:${IMAGE_TAG:?Set IMAGE_TAG to the published sha tag}
+    platform: linux/amd64
     restart: unless-stopped
     networks: [attendance]
 
@@ -86,3 +86,4 @@ networks:
 
 volumes:
   redis-data:
+  face-models:

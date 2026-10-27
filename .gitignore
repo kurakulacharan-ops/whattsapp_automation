@@ -63,3 +63,7 @@ frontend/build/
 *.bak
 *.dump
 *.backup
+
+# Production files stay on the deployment host
+deploy/runtime.env
+deploy/letsencrypt/
