@@ -1,0 +1,18 @@
+# Use with docker-compose.production.yml to build on the Docker host.
+x-backend-build: &backend-build
+  context: ..
+  dockerfile: deploy/Dockerfile.backend
+
+services:
+  backend:
+    build: *backend-build
+  worker:
+    build: *backend-build
+  absence-worker:
+    build: *backend-build
+  notification-worker:
+    build: *backend-build
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend

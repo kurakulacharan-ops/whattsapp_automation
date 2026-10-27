@@ -33,6 +33,7 @@ jobs:
         run: |
           cp deploy/runtime.env.example deploy/runtime.env
           docker compose -f deploy/docker-compose.production.yml config --quiet
+          docker compose --env-file deploy/build.env.example -f deploy/docker-compose.production.yml -f deploy/docker-compose.build.yml config --quiet
       - name: Build backend
         uses: docker/build-push-action@v6
         with:

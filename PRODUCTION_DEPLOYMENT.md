@@ -1,5 +1,51 @@
 # Deploy published Docker images from GHCR
 
+## Alternative: build from a checkout on the Windows Docker host
+
+If the server should pull approved source and build its own images, use this
+route instead of downloading a GHCR deployment bundle. The Docker engine must
+run Linux containers. The Windows Server support guidance below still applies.
+
+For example, clone the repository to `C:\attendance\whattsapp_automation`.
+For an existing checkout, fetch and check out the approved commit before building;
+do not discard local changes or secret files. Put your existing application
+`.env` at **`C:\attendance\whattsapp_automation\deploy\runtime.env`**.
+The filename must be `runtime.env`, not `runtime.env.txt`. This is the file all
+backend processes read. It is ignored by Git and excluded from Docker images.
+No application secrets belong in `deploy/build.env.example` or `deploy/.env`.
+
+If you do not already have an application env file, initialize one without
+overwriting an existing file. From the repository root in Command Prompt:
+
+```bat
+if not exist deploy\runtime.env copy deploy\runtime.env.example deploy\runtime.env
+notepad deploy\runtime.env
+```
+
+Set the real SQL connection, JWT and Interakt values described under Server
+configuration below. If SQL Server runs directly on the same Windows machine,
+Docker Desktop containers usually reach it through `host.docker.internal`,
+with the configured SQL TCP port. Use a hostname matching the SQL TLS certificate
+and reachable from the containers; keep certificate verification enabled.
+`localhost` inside a container refers to that container, not the Windows host.
+
+Configure `deploy/nginx.conf` with the production domain and supply its TLS
+certificates under `deploy/letsencrypt/` before starting the HTTPS gateway.
+Then run from the repository root:
+
+```bat
+deploy\run-from-source.cmd
+docker compose --env-file deploy\build.env.example -f deploy\docker-compose.production.yml -f deploy\docker-compose.build.yml ps
+```
+
+The script builds `attendance-backend:local` and `attendance-frontend:local` and
+starts the application with the existing SQL Server and internal Redis. It
+returns a failing exit code if validation, build or readiness fails. No GHCR
+login is needed for these locally built application images. For distinct local
+release tags, set `IMAGE_TAG` to the approved commit in the invoking shell before
+running the script. Repeat the health, login and pipeline checks below after
+startup. The rest of this document describes the image-publishing alternative.
+
 GitHub Actions builds and tests the application on pushes to `main`. After both
 images build and the backend tests pass, it publishes a matched pair:
 

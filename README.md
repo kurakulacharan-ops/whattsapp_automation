@@ -20,6 +20,11 @@ Automatic legacy hierarchy migration only runs in the source's `testing` mode;
 production does not automatically migrate existing roster data.
 
 See [production deployment](PRODUCTION_DEPLOYMENT.md) for server configuration.
+For a Windows source checkout, keep application secrets in
+`deploy\runtime.env`, configure the HTTPS gateway, and run
+`deploy\run-from-source.cmd` to build and start Docker containers. The source
+build route does not require GHCR login. Published-image deployment remains
+available through the GitHub Actions artifact.
 No databases, credentials, employee records, or source repository history are
 copied by this import.
 
