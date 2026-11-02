@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import settings
@@ -41,7 +41,14 @@ def decode_access_token(token: str) -> str:
     return payload["sub"]
 
 
+def token_expires_within(token: str, seconds: int) -> bool:
+    """Return whether a valid token is close enough to expiry to refresh."""
+    payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+    return float(payload["exp"]) - datetime.now(timezone.utc).timestamp() <= seconds
+
+
 async def get_current_user(
+    response: Response,
     credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
 ) -> AdminUser:
     """
@@ -54,6 +61,8 @@ async def get_current_user(
     )
     try:
         username = decode_access_token(credentials.credentials)
+        if token_expires_within(credentials.credentials, 15 * 24 * 60 * 60):
+            response.headers["X-Access-Token-Refresh"] = create_access_token(username)
     except jwt.PyJWTError:
         raise unauthorized
 

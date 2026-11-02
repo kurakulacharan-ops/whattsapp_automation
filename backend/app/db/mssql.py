@@ -39,7 +39,10 @@ COLLECTIONS = (
 INDEXED_FIELDS = {
     "roster": {"phone_number", "employee_id", "pc_id"},
     "coordinators": {"pc_id"},
-    "submissions": {"employee_id", "attendance_date", "image_hash", "event_id"},
+    "submissions": {
+        "employee_id", "attendance_date", "image_hash", "event_id",
+        "review_status", "person_role", "received_at_utc",
+    },
     "face_embeddings": {"employee_id"},
     "admin_users": {"username"},
     "webhook_events": {"event_id"},
@@ -439,14 +442,18 @@ class AsyncCursor:
 
     async def __anext__(self) -> dict:
         if self._values is None:
-            self._values = await self.collection._find_documents(self.query)
-            for field, direction in reversed(self.sort_fields):
-                self._values.sort(
-                    key=lambda doc: _sort_value(_field(doc, field)[1]),
-                    reverse=direction < 0,
+            if self.limit_value is not None:
+                self._values = await self.collection._find_page(
+                    self.query, self.sort_fields, self.offset, self.limit_value
                 )
-            end = None if self.limit_value is None else self.offset + self.limit_value
-            self._values = self._values[self.offset:end]
+            else:
+                self._values = await self.collection._find_documents(self.query)
+                for field, direction in reversed(self.sort_fields):
+                    self._values.sort(
+                        key=lambda doc: _sort_value(_field(doc, field)[1]),
+                        reverse=direction < 0,
+                    )
+                self._values = self._values[self.offset:]
         if self._index >= len(self._values):
             raise StopAsyncIteration
         value = self._values[self._index]
@@ -533,6 +540,46 @@ class Collection:
                 text(f"SELECT [id], [data_json] FROM {self.table}")
             )).all()
         return [document for document in map(_decode, rows) if _matches(document, query)]
+
+    async def _find_page(
+        self, query: dict, sort_fields: list[tuple[str, int]], offset: int, limit: int
+    ) -> list[dict]:
+        """Page in SQL Server so bounded list requests do not fetch whole tables."""
+        params: dict[str, Any] = {}
+        where = _sql_filter(query, params, self.name)
+        if where is None:
+            values = await self._find_documents(query)
+            for field, direction in reversed(sort_fields):
+                values.sort(
+                    key=lambda doc: _sort_value(_field(doc, field)[1]),
+                    reverse=direction < 0,
+                )
+            return values[offset:offset + limit]
+
+        order = []
+        for field, direction in sort_fields:
+            expr = (
+                "[id] COLLATE Latin1_General_100_BIN2"
+                if field == "_id"
+                else f"[{_indexed_column(field)}]"
+                if field in INDEXED_FIELDS.get(self.name, set())
+                else _json_value_expression(field)
+            )
+            order.append(f"{expr} {'DESC' if direction < 0 else 'ASC'}")
+        if not order:
+            order.append("[id] COLLATE Latin1_General_100_BIN2 ASC")
+        params["page_offset"] = offset
+        params["page_limit"] = limit
+        async with self.engine.connect() as connection:
+            rows = (await connection.execute(
+                text(
+                    f"SELECT [id], [data_json] FROM {self.table} WHERE {where} "
+                    f"ORDER BY {', '.join(order)} "
+                    "OFFSET :page_offset ROWS FETCH NEXT :page_limit ROWS ONLY"
+                ),
+                params,
+            )).all()
+        return list(map(_decode, rows))
 
     async def find_one(
         self, query: dict | None = None, projection: dict | None = None, sort: Any = None
@@ -736,6 +783,9 @@ async def ensure_indexes() -> None:
     await db.admin_users.create_index("username", unique=True)
     await db.webhook_events.create_index("event_id", unique=True)
     await db.submissions.create_index("event_id", unique=True, sparse=True)
+    await db.submissions.create_index("review_status")
+    await db.submissions.create_index("person_role")
+    await db.submissions.create_index("received_at_utc")
     await db.notifications.create_index("notification_id", unique=True)
     await db.notifications.create_index("status")
     await db.attendance_overrides.create_index(

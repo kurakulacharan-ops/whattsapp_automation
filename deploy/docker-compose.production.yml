@@ -10,9 +10,10 @@ x-backend: &backend
     ENVIRONMENT: production
     DB_BACKEND: mssql
     REDIS_URL: redis://redis:6379/0
-    LIVENESS_MIN_FACE_RATIO: "0.07"
+    LIVENESS_MIN_FACE_RATIO: "0.05"
   restart: unless-stopped
-  networks: [attendance]
+  networks:
+    - attendance
 
 services:
   backend:
@@ -56,29 +57,36 @@ services:
     image: ${IMAGE_PREFIX:-ghcr.io/kurakulacharan-ops/whattsapp_automation}-frontend:${IMAGE_TAG:?Set IMAGE_TAG to the published sha tag}
     platform: linux/amd64
     restart: unless-stopped
-    networks: [attendance]
+    networks:
+      - attendance
 
   nginx:
     image: nginx:1.29-alpine
     restart: unless-stopped
-    depends_on: [backend, frontend]
-    ports: ["80:80", "443:443"]
+    depends_on:
+      - backend
+      - frontend
+    ports:
+      ["80:80", "443:443"]
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./letsencrypt:/etc/letsencrypt:ro
-    networks: [attendance]
+    networks:
+      - attendance
 
   redis:
     image: redis:8-alpine
     command: [redis-server, --appendonly, "yes", --save, "60", "1000"]
     restart: unless-stopped
-    volumes: [redis-data:/data]
+    volumes:
+      - redis-data:/data
     healthcheck:
       test: [CMD, redis-cli, ping]
       interval: 5s
       timeout: 3s
       retries: 20
-    networks: [attendance]
+    networks:
+      - attendance
 
 networks:
   attendance:

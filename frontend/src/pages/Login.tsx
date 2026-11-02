@@ -16,21 +16,20 @@ export function LoginPage() {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
+
     try {
       await login(username.trim(), password);
       navigate("/attendance");
     } catch (err) {
       if (axios.isAxiosError(err)) {
         if (!err.response) {
-          setError(
-            "Could not reach the backend. Is it running, and is the dev proxy target correct?",
-          );
+          setError("Could not reach the server. Please check your connection and try again.");
         } else if (err.response.status === 401 || err.response.status === 403) {
-          setError("Username, password, or API key is incorrect.");
+          setError("Username or password is incorrect.");
+        } else if ([502, 503, 504].includes(err.response.status)) {
+          setError("The server is taking too long to respond. Please wait a moment and try again.");
         } else {
-          setError(
-            `Login failed (${err.response.status}): ${JSON.stringify(err.response.data)}`,
-          );
+          setError(`Login failed (${err.response.status}). Please try again or contact support.`);
         }
       } else {
         setError("Something went wrong signing in.");
@@ -51,8 +50,6 @@ export function LoginPage() {
         backgroundRepeat: "no-repeat",
       }}
     >
-      {/* Positioned at the horizontal rule-of-thirds line (2/3 across),
-          vertically centered — not dead-center on the page. */}
       <form
         onSubmit={handleSubmit}
         className="absolute w-full max-w-sm rounded-xl border p-8 shadow-lg"
@@ -132,7 +129,7 @@ export function LoginPage() {
           />
           <button
             type="button"
-            onClick={() => setShowPassword((v) => !v)}
+            onClick={() => setShowPassword((value) => !value)}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-xs"
             style={{ color: "var(--color-ink-muted)" }}
           >
@@ -141,7 +138,7 @@ export function LoginPage() {
         </div>
 
         {error && (
-          <p className="text-xs mb-4" style={{ color: "var(--color-absent)" }}>
+          <p className="text-xs mb-4" role="alert" style={{ color: "var(--color-absent)" }}>
             {error}
           </p>
         )}

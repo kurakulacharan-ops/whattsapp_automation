@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { UploadCloud, X } from 'lucide-react';
-import { enrollFace } from '../api/employees';
+import { enrollFace, getFaceEnrollmentStatus } from '../api/employees';
 import type { Employee } from '../types';
 
 const MAX_PHOTOS = 5;
@@ -11,7 +11,18 @@ export function EnrollFaceModal({ employee, onClose }: { employee: Employee; onC
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [existingCount, setExistingCount] = useState<number | null>(null);
+  const [checkingStatus, setCheckingStatus] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    getFaceEnrollmentStatus(employee.employee_id)
+      .then((status) => { if (active) setExistingCount(status.embeddings_stored); })
+      .catch(() => { if (active) setExistingCount(null); })
+      .finally(() => { if (active) setCheckingStatus(false); });
+    return () => { active = false; };
+  }, [employee.employee_id]);
 
   // Object URLs need explicit cleanup or they leak memory — regenerate
   // whenever the file list changes, revoke the previous batch on unmount/change.
@@ -72,6 +83,20 @@ export function EnrollFaceModal({ employee, onClose }: { employee: Employee; onC
           5 reference selfies recommended for reliable matching; fewer will be accepted with a
           warning.
         </p>
+        <p className="text-xs mb-3" style={{ color: 'var(--color-ink-muted)' }}>
+          {checkingStatus
+            ? 'Checking current enrollment…'
+            : existingCount === null
+            ? 'Could not check the current enrollment status.'
+            : existingCount > 0
+              ? `${existingCount} face reference photo(s) are currently enrolled. A successful enrollment replaces them.`
+              : 'No face references are currently enrolled.'}
+         </p>
+        {submitting && (
+          <p role="status" className="text-xs mb-3" style={{ color: 'var(--color-ink-muted)' }}>
+            Photos are uploading and being processed. Keep this dialog open until enrollment finishes.
+          </p>
+        )}
 
         {result ? (
           <>

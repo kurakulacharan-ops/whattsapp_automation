@@ -82,7 +82,7 @@ class RosterEntry(BaseModel):
     designation: str | None = None
     location_check_enabled: bool = True
     assigned_site: AssignedSite | None = None
-    geofence_radius_km: float = Field(default=8.0, gt=0, allow_inf_nan=False)
+    geofence_radius_km: float = Field(default=10.0, gt=0, allow_inf_nan=False)
     shift_start: str | None = None
     shift_end: str | None = None
     shift_grace_minutes: int | None = None
@@ -98,7 +98,7 @@ class EmployeeRegistrationRequest(BaseModel):
     designation: str | None = None
     location_check_enabled: bool = True
     assigned_site: AssignedSite | None = None
-    geofence_radius_km: float = Field(default=8.0, gt=0, allow_inf_nan=False)
+    geofence_radius_km: float = Field(default=10.0, gt=0, allow_inf_nan=False)
     shift_start: str | None = None
     shift_end: str | None = None
     shift_grace_minutes: int | None = None

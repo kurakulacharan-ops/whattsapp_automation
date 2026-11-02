@@ -44,6 +44,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [token]);
 
+  // localStorage is shared between tabs; keep every open tab on the same
+  // sign-in when one tab logs in, refreshes its token, or explicitly logs out.
+  useEffect(() => {
+    function syncSession(event: StorageEvent) {
+      if (event.key !== 'access_token') return;
+      const nextToken = event.newValue;
+      setToken(nextToken);
+      setRole(null);
+      setRoleLoading(Boolean(nextToken));
+    }
+    window.addEventListener('storage', syncSession);
+    return () => window.removeEventListener('storage', syncSession);
+  }, []);
+
   const login = useCallback(async (username: string, password: string) => {
     const { access_token, role } = await loginRequest(username, password);
     localStorage.setItem('access_token', access_token);

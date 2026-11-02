@@ -31,7 +31,9 @@ class Settings(BaseSettings):
     # --- CMS authentication (JWT) ---
     jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "")  # MUST be set in .env, no safe default
     jwt_algorithm: str = "HS256"
-    jwt_expire_minutes: int = 60
+    # Keep active manual review sessions alive across shifts. The frontend
+    # refreshes a token nearing expiry after an authenticated request.
+    jwt_expire_minutes: int = int(os.getenv("JWT_EXPIRE_MINUTES", str(30 * 24 * 60)))
 
     cors_origins: str = os.getenv("CORS_ORIGINS", "http://localhost:5173")
 

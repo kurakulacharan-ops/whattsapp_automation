@@ -13,7 +13,8 @@ from typing import Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import Response\
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 
 from app.auth import (
@@ -32,6 +33,7 @@ from app.db.database import (
     EmployeeUpdateRequest,
     ensure_indexes,
     get_admin_user,
+    get_enrollment,
     create_admin_user,
     get_db,
     migrate_legacy_reporting_hierarchy,
@@ -1013,7 +1015,10 @@ async def enroll_face(
         )
 
     image_bytes_list = [await photo.read() for photo in photos]
-    embeddings = enroll_embeddings(image_bytes_list)
+    # Face detection/model inference is CPU-bound. Keep it off the async API
+    # event loop so login and dashboard requests can still be served while an
+    # enrollment is being processed.
+    embeddings = await run_in_threadpool(enroll_embeddings, image_bytes_list)
 
     if len(embeddings) == 0:
         raise HTTPException(
@@ -1035,6 +1040,19 @@ async def enroll_face(
         "name": roster_entry.name,
         "embeddings_stored": len(embeddings),
     }
+
+
+@app.get("/employees/{employee_id}/face-enrollment")
+async def get_face_enrollment_status(
+    employee_id: str,
+    admin: AdminUser = Depends(get_current_admin),
+):
+    """Report how many usable face references are currently stored."""
+    roster_entry = await get_roster_by_employee_id(employee_id)
+    if roster_entry is None:
+        raise HTTPException(status_code=404, detail="Attendance participant not found")
+    embeddings = await get_enrollment(employee_id)
+    return {"employee_id": employee_id, "enrolled": bool(embeddings), "embeddings_stored": len(embeddings)}
 
 
 class LocationCoordinates(BaseModel):

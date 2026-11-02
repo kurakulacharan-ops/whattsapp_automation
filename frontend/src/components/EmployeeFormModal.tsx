@@ -38,7 +38,7 @@ export function EmployeeFormModal({
     designation: employee?.designation ?? undefined,
     location_check_enabled: employee?.location_check_enabled ?? true,
     assigned_site: employee?.assigned_site ?? undefined,
-    geofence_radius_km: employee?.geofence_radius_km ?? 8,
+    geofence_radius_km: employee?.geofence_radius_km ?? 10,
     shift_start: employee?.shift_start ?? roleShiftDefaults(employee?.role ?? 'FS').shift_start,
     shift_end: employee?.shift_end ?? roleShiftDefaults(employee?.role ?? 'FS').shift_end,
     shift_grace_minutes: employee?.shift_grace_minutes ?? roleShiftDefaults(employee?.role ?? 'FS').shift_grace_minutes,
@@ -249,10 +249,10 @@ export function EmployeeFormModal({
         )}
         {(form.role !== 'FS' || form.location_check_enabled !== false) && <>
         <label className="block mb-4 text-sm">Allowed range (km)
-          <input type="number" min="0.01" step="any" value={form.geofence_radius_km ?? 8}
+          <input type="number" min="0.01" step="any" value={form.geofence_radius_km ?? 10}
             onChange={(e) => set('geofence_radius_km', Number(e.target.value))}
             className="block w-full px-3 py-2 rounded-md text-sm border" style={inputStyle} />
-          <span className="text-xs">Default: 8 km. Change only when needed. Outside this range, check the same city/town.</span>
+          <span className="text-xs">Default: 10 km. Change only when needed. Outside this range, check the same city/town.</span>
         </label>
         <div className="mb-4"><AssignedSiteMap site={site} onChange={setSite} /></div>
         </>}

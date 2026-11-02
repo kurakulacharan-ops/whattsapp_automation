@@ -49,25 +49,6 @@ export function MonthlyAttendanceGrid({ onClose, canManage }: { onClose: () => v
     pc_id: pcId || undefined,
   }), [month, year, role, pcId]);
 
-  const load = useCallback(async () => {
-    const requestId = ++requestSequence.current;
-    try {
-      const result = await fetchGrid();
-      if (requestId === requestSequence.current) {
-        setError(null);
-        setDays(result.days);
-        setRows(result.rows);
-      }
-    } catch (err) {
-      const detail = axios.isAxiosError(err) ? err.response?.data?.detail : null;
-      if (requestId === requestSequence.current) {
-        setError(typeof detail === 'string' ? detail : 'Could not load the monthly attendance grid.');
-      }
-    } finally {
-      if (requestId === requestSequence.current) setLoading(false);
-    }
-  }, [fetchGrid]);
-
   useEffect(() => {
     let active = true;
     const requestId = ++requestSequence.current;
@@ -116,9 +97,10 @@ export function MonthlyAttendanceGrid({ onClose, canManage }: { onClose: () => v
         attendance_code: code,
         reason: reason.trim() || undefined,
       });
+      setRows((current) => current.map((row) => row.employee_id === editing.row.employee_id
+        ? { ...row, attendance: { ...row.attendance, [editing.date]: code } }
+        : row));
       setEditing(null);
-      setLoading(true);
-      await load();
     } catch (err) {
       const detail = axios.isAxiosError(err) ? err.response?.data?.detail : null;
       setError(typeof detail === 'string' ? detail : 'Could not save the attendance change.');

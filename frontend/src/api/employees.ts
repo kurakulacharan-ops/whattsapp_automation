@@ -76,3 +76,12 @@ export async function enrollFace(employee_id: string, photos: File[]) {
   }>('/enroll-face', form, { headers: { 'Content-Type': 'multipart/form-data' } });
   return data;
 }
+
+export async function getFaceEnrollmentStatus(employee_id: string) {
+  const { data } = await apiClient.get<{
+    employee_id: string;
+    enrolled: boolean;
+    embeddings_stored: number;
+  }>(`/employees/${encodeURIComponent(employee_id)}/face-enrollment`);
+  return data;
+}

@@ -78,7 +78,7 @@ export function AssignedSiteMap({ site, onChange }: { site?: SiteValue; onChange
       <div className="flex items-center justify-between mb-2">
         <div>
           <div className="text-xs font-medium" style={{ color: 'var(--color-ink)' }}>Assigned location</div>
-          <div className="text-[11px]" style={{ color: 'var(--color-ink-faint)' }}>Within the allowed range: pass. Outside that range: check the same city/town. Default range is 8 km.</div>
+          <div className="text-[11px]" style={{ color: 'var(--color-ink-faint)' }}>Within the allowed range: pass. Outside that range: check the same city/town. Default range is 10 km.</div>
         </div>
         <button type="button" disabled={photoBusy} onClick={locate} className="px-2 py-1 rounded border text-xs" style={{ borderColor: 'var(--color-border)' }}>
           Use my location

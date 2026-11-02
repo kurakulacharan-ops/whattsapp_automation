@@ -20,7 +20,11 @@ apiClient.interceptors.request.use((config) => {
 // happens, the token's dead — clear it and bounce to /login rather than
 // showing a confusing error in place.
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const refreshedToken = response.headers['x-access-token-refresh'];
+    if (refreshedToken) localStorage.setItem('access_token', refreshedToken);
+    return response;
+  },
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('access_token');

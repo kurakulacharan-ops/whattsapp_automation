@@ -103,6 +103,14 @@ def build_reply_message(
         return (
             "⚠️ Your attendance photo could not be verified. Reason: Face enrollment is incomplete."
         )
+    if "liveness_face_too_small" in issues:
+        return (
+            "⚠️ Your face looks too small in the photo. Please move closer, keep your full face visible, and try again."
+        )
+    if any(issue.startswith("identity_") for issue in issues):
+        return (
+            "⚠️ Your face was detected, but it did not match the saved enrollment. Please make sure the enrolled participant is taking the photo and try again."
+        )
     if any(issue.startswith(("date_mismatch", "exif_date_mismatch", "possible_date_edit")) for issue in issues):
         reason = "Photo date mismatch"
     elif any("duplicate" in issue for issue in issues):

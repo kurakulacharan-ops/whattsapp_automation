@@ -152,9 +152,15 @@ export function AttendancePage() {
         attendance_code: statusCode,
         reason: statusReason.trim() || undefined,
       });
+      // Update visible rows immediately. Re-fetching the whole attendance
+      // page after every override made the table flash blank on slow SQL links.
+      setRecords((current) => current.map((record) =>
+        record.employee_id === editingStatus.employee_id && record.attendance_date === editingStatus.attendance_date
+          ? { ...record, attendance_code: statusCode }
+          : record
+      ));
       setEditingStatus(null);
       setStatusReason('');
-      await load();
     } catch {
       setError('Could not change this attendance status. Please try again.');
     } finally {
