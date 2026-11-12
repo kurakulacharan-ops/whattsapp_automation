@@ -240,7 +240,7 @@ class CoordinatorDetailsWorkbookTests(unittest.TestCase):
 
         self.assertEqual(
             [sheet.cell(1, column).value for column in range(1, 7)],
-            ["S.No", "ID", "Name", "Phone", "Status", "Participant Areas"],
+            ["S.No", "ID", "Name", "Mobile Number", "Status", "Participant Areas"],
         )
         self.assertEqual(
             [sheet.cell(2, column).value for column in range(1, 7)],
@@ -485,9 +485,10 @@ class AttendanceExportTests(unittest.TestCase):
         self.assertEqual(workbook["Project Coordinators"]["F2"].value, 1)
         attendance = workbook["Local supervisors"]
         self.assertEqual(attendance["A2"].value, 1)
-        self.assertEqual(attendance["E2"].value, "Coordinator (PC001)")
-        self.assertEqual(attendance["G2"].value, "P")
-        self.assertEqual(attendance["H2"].value, '=COUNTIF(G2:G2,"P")+COUNTIF(G2:G2,"L")+COUNTIF(G2:G2,"M")')
+        self.assertEqual(attendance["E2"].value, "Not Assigned")
+        self.assertEqual(attendance["F2"].value, "Coordinator (PC001)")
+        self.assertEqual(attendance["H2"].value, "P")
+        self.assertEqual(attendance["I2"].value, '=COUNTIF(H2:H2,"P")+COUNTIF(H2:H2,"L")+COUNTIF(H2:H2,"M")')
 
     def test_participant_details_workbook_contains_roster_only_columns_and_total(self):
         workbook_bytes = build_participant_details_workbook(
@@ -514,12 +515,12 @@ class AttendanceExportTests(unittest.TestCase):
         sheet = workbook["Participant Details"]
 
         self.assertEqual(
-            [sheet.cell(1, column).value for column in range(1, 9)],
-            ["S.No", "ID", "Name", "Department", "Reports To", "Area", "Designation", "Status"],
+            [sheet.cell(1, column).value for column in range(1, 10)],
+            ["S.No", "ID", "Name", "Mobile Number", "Department", "Reports To", "Area", "Designation", "Status"],
         )
         self.assertEqual(
-            [sheet.cell(2, column).value for column in range(1, 9)],
-            [1, "EMP001", "Charan", "FS", "Naveen", "Asthi", "Field Supervisor", "Active"],
+            [sheet.cell(2, column).value for column in range(1, 10)],
+            [1, "EMP001", "Charan", "Not Assigned", "FS", "Naveen", "Asthi", "Field Supervisor", "Active"],
         )
         self.assertEqual(sheet["A3"].value, 2)
         self.assertEqual(sheet["B3"].value, "EMP002")
@@ -567,5 +568,6 @@ class ParticipantDetailsExportEndpointTests(unittest.IsolatedAsyncioTestCase):
         )
         workbook = load_workbook(BytesIO(response.body), data_only=True)
         self.assertEqual(workbook.sheetnames, ["Participant Details"])
-        self.assertEqual(workbook.active["E2"].value, "Naveen")
+        self.assertEqual(workbook.active["D2"].value, "911234567890")
+        self.assertEqual(workbook.active["F2"].value, "Naveen")
         self.assertNotIn("Summary", workbook.sheetnames)
