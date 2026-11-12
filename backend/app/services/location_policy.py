@@ -5,7 +5,7 @@ from app.services.city_lookup import resolve_city, same_city
 from app.services.geofence import check_geofence
 
 
-DEFAULT_ATTENDANCE_RADIUS_KM = 10.0
+DEFAULT_ATTENDANCE_RADIUS_KM = 8.0
 
 
 async def check_attendance_location(lat, lon, site_lat, site_lon, radius_km=DEFAULT_ATTENDANCE_RADIUS_KM):

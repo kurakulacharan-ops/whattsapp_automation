@@ -31,16 +31,17 @@ export function EmployeeFormModal({
   const [form, setForm] = useState<CreateEmployeePayload>({
     phone_number: employee?.phone_number ?? '',
     name: employee?.name ?? '',
-    role: employee?.role ?? 'FS',
+    role: employee?.role === 'LS' || employee?.role === 'LSS' ? employee.role : 'FS',
     pc_id: employee?.pc_id ?? undefined,
     parent_employee_id: undefined,
     area: employee?.area ?? undefined,
     designation: employee?.designation ?? undefined,
     location_check_enabled: employee?.location_check_enabled ?? true,
     assigned_site: employee?.assigned_site ?? undefined,
-    geofence_radius_km: employee?.geofence_radius_km ?? 10,
+    geofence_radius_km: employee?.geofence_radius_km ?? 8,
     shift_start: employee?.shift_start ?? roleShiftDefaults(employee?.role ?? 'FS').shift_start,
     shift_end: employee?.shift_end ?? roleShiftDefaults(employee?.role ?? 'FS').shift_end,
+    shift_allowed_minutes: employee?.shift_allowed_minutes ?? roleShiftDefaults(employee?.role ?? 'FS').shift_allowed_minutes,
     shift_grace_minutes: employee?.shift_grace_minutes ?? roleShiftDefaults(employee?.role ?? 'FS').shift_grace_minutes,
   });
   const [phoneDigits, setPhoneDigits] = useState(initialLocalDigits);
@@ -64,7 +65,7 @@ export function EmployeeFormModal({
 
   const phoneValid = phoneDigits.length === 10;
   const hierarchyValid = Boolean(form.pc_id);
-  function handleRoleChange(role: AttendanceRole) {
+  function handleRoleChange(role: Exclude<AttendanceRole, 'PC'>) {
     setForm((current) => ({
       ...current,
       ...roleShiftDefaults(role),
@@ -210,6 +211,16 @@ export function EmployeeFormModal({
               style={inputStyle}
             />
           </Field>
+          <Field label="Allowed time (min)">
+            <input
+              type="number"
+              min="0"
+              value={form.shift_allowed_minutes ?? ''}
+              onChange={(e) => set('shift_allowed_minutes', e.target.value ? Number(e.target.value) : undefined)}
+              className="w-full px-3 py-2 rounded-md text-sm border"
+              style={inputStyle}
+            />
+          </Field>
           <Field label="Grace period (min)">
             <input
               type="number"
@@ -249,10 +260,10 @@ export function EmployeeFormModal({
         )}
         {(form.role !== 'FS' || form.location_check_enabled !== false) && <>
         <label className="block mb-4 text-sm">Allowed range (km)
-          <input type="number" min="0.01" step="any" value={form.geofence_radius_km ?? 10}
+          <input type="number" min="0.01" step="any" value={form.geofence_radius_km ?? 8}
             onChange={(e) => set('geofence_radius_km', Number(e.target.value))}
             className="block w-full px-3 py-2 rounded-md text-sm border" style={inputStyle} />
-          <span className="text-xs">Default: 10 km. Change only when needed. Outside this range, check the same city/town.</span>
+          <span className="text-xs">Default: 8 km. Change only when needed. Outside this range, check the same city/town.</span>
         </label>
         <div className="mb-4"><AssignedSiteMap site={site} onChange={setSite} /></div>
         </>}

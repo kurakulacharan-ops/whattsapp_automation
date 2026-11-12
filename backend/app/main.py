@@ -13,7 +13,7 @@ from typing import Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
-from fastapi.responses import Response\
+from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 
@@ -40,7 +40,10 @@ from app.db.database import (
     list_admin_users,
     get_roster_by_employee_id,
     get_submissions_grouped,
+    get_coordinator_attendance_grouped,
     list_attendance,
+    list_coordinator_attendance,
+    initialize_coordinator_attendance_defaults,
     list_attendance_people,
     list_coordinators,
     list_employees,
@@ -54,6 +57,10 @@ from app.db.database import (
     update_coordinator,
     update_employee_details,
     create_manual_attendance,
+    delete_attendance_calendar_event,
+    save_coordinator_attendance,
+    get_attendance_calendar_data,
+    save_attendance_calendar_event,
     delete_attendance_submission,
     delete_coordinator_if_unassigned,
     delete_employee_without_attendance,
@@ -66,6 +73,7 @@ from app.security import verify_webhook_signature
 from app.services.face_match import enroll_embeddings
 from app.redis_queue import ATTENDANCE_STREAM, ensure_stream_group, enqueue, get_redis
 from app.services.attendance_grid import compute_employee_grid, daterange
+from app.services.attendance_calendar import calendar_codes_for_days
 from app.services.attendance_export_xlsx import (
     build_export_workbook,
     build_coordinator_details_workbook,
@@ -114,6 +122,23 @@ class ManualAttendanceRequest(BaseModel):
     employee_id: str
     date: str  # "YYYY-MM-DD"
     reason: str  # required — the whole point of this endpoint is an auditable justification
+
+
+class CoordinatorAttendanceRequest(BaseModel):
+    pc_id: str
+    date: str
+    attendance_code: Literal["P", "A", "WO", "H"]
+    reason: str | None = None
+
+
+class CoordinatorAttendanceDefaultsRequest(BaseModel):
+    date: str
+
+
+class AttendanceCalendarEventRequest(BaseModel):
+    date: str
+    kind: Literal["holiday", "weekoff", "other", "working_day"]
+    name: str = Field(min_length=1, max_length=120)
 
 
 class AttendanceOverrideRequest(BaseModel):
@@ -572,7 +597,7 @@ async def get_attendance_grid(
     role: Literal["PC", "FS", "LS", "LSS"] | None = None,
     admin: AdminUser = Depends(get_current_user),
 ):
-    """Return monthly attendance for FS, LS, and LSS participants."""
+    """Return monthly attendance for participants, including calendar markers."""
     import calendar
 
     if month < 1 or month > 12:
@@ -589,6 +614,8 @@ async def get_attendance_grid(
     )
     person_ids = [person.employee_id for person in people]
     submissions = await get_submissions_grouped(person_ids, date_from, date_to)
+    calendar_data = await get_attendance_calendar_data(date_from, date_to)
+    calendar_codes = calendar_codes_for_days(days, calendar_data)
 
     rows = []
     for person in people:
@@ -597,6 +624,7 @@ async def get_attendance_grid(
             person.deactivated_at,
             submissions.get(person.employee_id, {}),
             days,
+            calendar_codes=calendar_codes,
         )
         if grid is None:
             continue
@@ -653,6 +681,10 @@ async def get_attendance(
     date_from: str | None = None,
     date_to: str | None = None,
     search: str | None = None,
+    area: str | None = None,
+    attendance_status: str | None = None,
+    include_coordinator_attendance: bool = False,
+    role: Literal["PC", "FS", "LS", "LSS"] | None = None,
     page: int = 1,
     page_size: int = 50,
     admin: AdminUser = Depends(get_current_user),
@@ -669,10 +701,23 @@ async def get_attendance(
     "geofence_fail_300m" — not safe to string-match directly). Use
     issues_display for UI text; issues[] if you need the raw codes.
     """
+    # Empty selects commonly arrive as ``attendance_status=``. Treat that as
+    # no filter so the unfiltered attendance list remains valid.
+    attendance_status = attendance_status or None
+    if attendance_status and attendance_status not in {"present", "late", "absent", "flagged"}:
+        raise HTTPException(status_code=400, detail="attendance_status must be present, late, absent, or flagged")
+    if (include_coordinator_attendance or role == "PC") and admin.role not in {"super_admin", "manual_team"}:
+        raise HTTPException(status_code=403, detail="Coordinator attendance is restricted to administrators and manual team")
     records, total = await list_attendance(
         employee_id=employee_id, pc_id=pc_id, verdict=verdict,
-        date_from=date_from, date_to=date_to, search=search,
-        page=page, page_size=page_size,
+        date_from=date_from, date_to=date_to, search=search, area=area,
+        attendance_status=attendance_status,
+        include_coordinator_attendance=(
+            (include_coordinator_attendance or role == "PC")
+            and admin.role in {"super_admin", "manual_team"}
+        ),
+        role=role,
+        page=page, page_size=min(max(page_size, 1), 500),
     )
     from app.services.attendance_grid import marker_for_submission
     from app.services.shift_check import check_shift_window
@@ -682,7 +727,11 @@ async def get_attendance(
         record["issues_display"] = format_issue_list(issues)
         for attempt in record.get("previous_flagged_attempts") or []:
             attempt["issues_display"] = format_issue_list(attempt.get("issues") or [])
-        record["flag_reason"] = flag_reason_from_issues(issues) if record.get("verdict") == "flagged" else None
+        record["flag_reason"] = (
+            flag_reason_from_issues(issues)
+            if record.get("verdict") == "flagged" and record.get("review_status") == "pending"
+            else None
+        )
         photo_ts = record.get("photo_timestamp") or (record.get("overlay") or {}).get("timestamp")
         if photo_ts:
             try:
@@ -691,15 +740,27 @@ async def get_attendance(
                     capture = capture.replace(tzinfo=local_tz)
                 capture = capture.astimezone(local_tz)
                 record["check_in_at_ist"] = capture.isoformat()
-                employee = await get_roster_by_employee_id(record["employee_id"]) if record.get("employee_id") else None
+                employee = await get_roster_by_employee_id(record["employee_id"]) if record.get("employee_id") and record.get("person_role") != "PC" else None
                 if employee:
-                    status, _ = check_shift_window(capture, employee.shift_start, employee.shift_end, employee.shift_grace_minutes, employee.role)
+                    status, _ = check_shift_window(
+                        capture, employee.shift_start, employee.shift_end,
+                        employee.shift_grace_minutes, employee.role,
+                        employee_allowed_minutes=employee.shift_allowed_minutes,
+                    )
                     record["shift_status"] = status
             except (ValueError, TypeError):
                 record["check_in_at_ist"] = None
         else:
             record["check_in_at_ist"] = None
         record["attendance_code"] = marker_for_submission(record)
+        if record.get("attendance_status") == "present" and record.get("shift_status") == "on_time":
+            record["attendance_code"] = "P"
+        elif record.get("attendance_status") == "late":
+            record["attendance_code"] = "L"
+        elif record.get("attendance_status") == "absent":
+            record["attendance_code"] = "A"
+        elif record.get("attendance_status") == "absent_late":
+            record["attendance_code"] = "AL"
         if record.get("entry_type") == "system" and record.get("attendance_status") == "absent":
             record["attendance_code"] = "A"
         if (
@@ -750,6 +811,8 @@ async def get_attendance(
                 if record.get("location_check_method") == "range_then_city"
                 else "City/district check unavailable"
             )
+        elif record.get("entry_type") == "coordinator_manual":
+            record["geofence_display"] = "Not applicable"
         else:
             radius = record.get("geofence_radius_meters")
             radius_display = (
@@ -789,15 +852,140 @@ async def get_attendance(
     if override_keys:
         overrides_by_key = {}
         async for override in get_db().attendance_overrides.find({"$or": override_keys}):
-            overrides_by_key[(override["employee_id"], override["attendance_date"])] = override["attendance_code"]
+            overrides_by_key[(override["employee_id"], override["attendance_date"])] = override
         for record in records:
             key = (record.get("employee_id"), record.get("attendance_date"))
             if key in overrides_by_key:
-                record["attendance_code"] = overrides_by_key[key]
+                override = overrides_by_key[key]
+                record["attendance_code"] = override["attendance_code"]
+                record["status_change_reason"] = override.get("reason") or None
     return {
         "count": len(records), "total": total, "page": page, "page_size": page_size,
         "records": records,
     }
+
+
+@app.get("/attendance/coordinators")
+async def get_coordinator_attendance(
+    pc_id: str | None = None, date_from: str | None = None,
+    date_to: str | None = None, attendance_status: str | None = None,
+    search: str | None = None, page: int = 1, page_size: int = 25,
+    admin: AdminUser = Depends(get_current_admin),
+):
+    if admin.role not in {"super_admin", "manual_team"}:
+        raise HTTPException(status_code=403, detail="Coordinator attendance is restricted to administrators and manual team")
+    attendance_status = attendance_status or None
+    if attendance_status not in {None, "present", "absent", "week_off", "holiday"}:
+        raise HTTPException(status_code=400, detail="attendance_status must be present, absent, week_off, or holiday")
+    records, total = await list_coordinator_attendance(
+        pc_id=pc_id, date_from=date_from, date_to=date_to,
+        attendance_status=attendance_status, search=search,
+        page=page, page_size=min(max(page_size, 1), 500),
+    )
+    return {"count": len(records), "total": total, "page": page,
+            "page_size": page_size, "records": records}
+
+
+@app.get("/attendance/calendar")
+async def get_attendance_calendar(
+    month: int,
+    year: int,
+    admin: AdminUser = Depends(get_current_admin),
+):
+    """Organization-wide weekly-off rules and date-specific attendance events."""
+    import calendar
+
+    if month < 1 or month > 12 or year < 2000 or year > 2100:
+        raise HTTPException(status_code=400, detail="month or year is outside the supported range")
+    date_from = f"{year:04d}-{month:02d}-01"
+    date_to = f"{year:04d}-{month:02d}-{calendar.monthrange(year, month)[1]:02d}"
+    data = await get_attendance_calendar_data(date_from, date_to)
+    return {
+        "month": month,
+        "year": year,
+        "sunday_weekly_off": data["sunday_weekly_off"],
+        "events": data["events"],
+    }
+
+
+@app.put("/attendance/calendar/events")
+async def put_attendance_calendar_event(
+    request: AttendanceCalendarEventRequest,
+    admin: AdminUser = Depends(get_current_admin),
+):
+    try:
+        event_date = datetime.strptime(request.date, "%Y-%m-%d").date().isoformat()
+        if event_date != request.date:
+            raise ValueError("date must use YYYY-MM-DD")
+    except ValueError:
+        raise HTTPException(status_code=422, detail="date must use YYYY-MM-DD")
+    if request.kind == "working_day" and datetime.strptime(request.date, "%Y-%m-%d").date().weekday() != 6:
+        raise HTTPException(
+            status_code=422,
+            detail="Working-day exceptions are only used to lift the default Sunday week-off",
+        )
+    return await save_attendance_calendar_event(
+        event_date, request.kind, request.name, admin.username
+    )
+
+
+@app.delete("/attendance/calendar/events/{event_date}")
+async def remove_attendance_calendar_event(
+    event_date: str,
+    admin: AdminUser = Depends(get_current_admin),
+):
+    try:
+        parsed_date = datetime.strptime(event_date, "%Y-%m-%d").date().isoformat()
+        if parsed_date != event_date:
+            raise ValueError("date must use YYYY-MM-DD")
+    except ValueError:
+        raise HTTPException(status_code=422, detail="date must use YYYY-MM-DD")
+    if not await delete_attendance_calendar_event(parsed_date):
+        raise HTTPException(status_code=404, detail="Calendar event not found")
+    return {"deleted": True}
+
+
+@app.post("/attendance/coordinators/defaults")
+async def post_coordinator_attendance_defaults(
+    request: CoordinatorAttendanceDefaultsRequest,
+    admin: AdminUser = Depends(get_current_admin),
+):
+    if admin.role not in {"super_admin", "manual_team"}:
+        raise HTTPException(status_code=403, detail="Coordinator attendance is restricted to administrators and manual team")
+    try:
+        date_obj = datetime.strptime(request.date, "%Y-%m-%d").date()
+        if date_obj.isoformat() != request.date:
+            raise ValueError("date must use YYYY-MM-DD")
+    except ValueError:
+        raise HTTPException(status_code=422, detail="date must use YYYY-MM-DD")
+    today = datetime.now(ZoneInfo(settings.app_timezone)).date().isoformat()
+    if request.date != today:
+        raise HTTPException(status_code=400, detail="Defaults can only be initialized for today")
+    count = await initialize_coordinator_attendance_defaults(request.date, admin.username)
+    return {"initialized": count}
+
+
+@app.post("/attendance/coordinators")
+async def post_coordinator_attendance(
+    request: CoordinatorAttendanceRequest,
+    admin: AdminUser = Depends(get_current_admin),
+):
+    if admin.role not in {"super_admin", "manual_team"}:
+        raise HTTPException(status_code=403, detail="Coordinator attendance is restricted to administrators and manual team")
+    try:
+        date_obj = datetime.strptime(request.date, "%Y-%m-%d").date()
+        if date_obj.isoformat() != request.date:
+            raise ValueError("date must use YYYY-MM-DD")
+    except ValueError:
+        raise HTTPException(status_code=422, detail="date must use YYYY-MM-DD")
+    try:
+        return await save_coordinator_attendance(
+            request.pc_id, request.date, request.attendance_code,
+            request.reason, admin.username,
+        )
+    except ValueError as exc:
+        status_code = 400 if "inactive" in str(exc).lower() else 404
+        raise HTTPException(status_code=status_code, detail=str(exc))
 
 
 @app.delete("/attendance/{submission_id}")
@@ -902,6 +1090,7 @@ async def export_attendance(
     pc_id: str | None = None,
     employee_id: str | None = None,
     area: str | None = None,
+    include_coordinator_attendance: bool = False,
     admin: AdminUser = Depends(get_current_admin),
 ):
     """
@@ -929,7 +1118,11 @@ async def export_attendance(
     days = daterange(date_from, date_to)
 
     # Keep coordinator names for employee hierarchy labels; PCs are not attendance participants.
-    coordinators, _ = await list_coordinators(pc_id=pc_id, page_size=100_000)
+    coordinators, _ = await list_coordinators(
+        pc_id=pc_id,
+        is_active=True if employee_id is not None or area is not None else None,
+        page_size=100_000,
+    )
     coordinators = [c.model_dump() for c in coordinators]
     employees, _ = await list_employees(pc_id=pc_id, area=area, page_size=100_000)
     employees = [e.model_dump() for e in employees]
@@ -956,6 +1149,8 @@ async def export_attendance(
     participants = employees
     employee_ids = [person["employee_id"] for person in participants]
     submissions_by_employee = await get_submissions_grouped(employee_ids, date_from, date_to)
+    calendar_data = await get_attendance_calendar_data(date_from, date_to)
+    calendar_codes = calendar_codes_for_days(days, calendar_data)
 
     grids = {}
     for person in participants:
@@ -964,9 +1159,33 @@ async def export_attendance(
             person.get("deactivated_at"),
             submissions_by_employee.get(person["employee_id"], {}),
             days,
+            calendar_codes=calendar_codes,
         )
 
-    xlsx_bytes = build_export_workbook(coordinators, employees, grids, days)
+    if include_coordinator_attendance:
+        coordinator_submissions = await get_coordinator_attendance_grouped(
+            [coordinator["pc_id"] for coordinator in coordinators], date_from, date_to
+        )
+        for pc_id, submissions_by_date in coordinator_submissions.items():
+            grids[pc_id] = {
+                day: (
+                    calendar_codes[day]
+                    if day in calendar_codes and submission.get("defaulted") else
+                    submission.get("attendance_code") or (
+                        "P" if submission.get("attendance_status") == "present" else
+                        "A" if submission.get("attendance_status") == "absent" else
+                        calendar_codes.get(day, "—")
+                    )
+                )
+                for day, submission in submissions_by_date.items()
+            }
+            for day, calendar_code in calendar_codes.items():
+                grids[pc_id].setdefault(day, calendar_code)
+
+    xlsx_bytes = build_export_workbook(
+        coordinators, employees, grids, days,
+        include_coordinator_attendance=include_coordinator_attendance,
+    )
 
     filename = f"attendance_{date_from}_to_{date_to}.xlsx"
     return Response(

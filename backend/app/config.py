@@ -91,7 +91,7 @@ class Settings(BaseSettings):
 
     # --- Passive anti-spoofing / image-quality guard ---
     liveness_enabled: bool = os.getenv("LIVENESS_ENABLED", "true").lower() == "true"
-    liveness_min_face_ratio: float = float(os.getenv("LIVENESS_MIN_FACE_RATIO", "0.08"))
+    liveness_min_face_ratio: float = float(os.getenv("LIVENESS_MIN_FACE_RATIO", "0.05"))
     liveness_min_sharpness: float = float(os.getenv("LIVENESS_MIN_SHARPNESS", "35.0"))
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

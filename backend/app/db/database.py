@@ -38,6 +38,65 @@ def normalize_date_str(val: str | None) -> str:
     return val[:10]
 
 
+async def get_attendance_calendar_data(
+    date_from: str | None = None, date_to: str | None = None,
+) -> dict:
+    """Return the recurring Sunday default and date-specific calendar events."""
+    db = get_db()
+    events = []
+    norm_from = normalize_date_str(date_from) if date_from else None
+    norm_to = normalize_date_str(date_to) if date_to else None
+    async for event in db.attendance_calendar.find({}):
+        event_date = event.get("event_date")
+        if not event_date:
+            continue
+        if norm_from and event_date < norm_from:
+            continue
+        if norm_to and event_date > norm_to:
+            continue
+        events.append(event)
+    events.sort(key=lambda item: item["event_date"])
+    return {"sunday_weekly_off": True, "events": events}
+
+
+async def save_attendance_calendar_event(
+    event_date: str, kind: str, name: str, changed_by: str,
+) -> dict:
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    result = await db.attendance_calendar.find_one_and_update(
+        {"event_date": normalize_date_str(event_date)},
+        {
+            "$set": {
+                "event_date": normalize_date_str(event_date),
+                "kind": kind,
+                "name": name.strip(),
+                "updated_by": changed_by,
+                "updated_at_utc": now,
+            },
+            "$setOnInsert": {"created_by": changed_by, "created_at_utc": now},
+        },
+        return_document=True,
+        upsert=True,
+    )
+    return result
+
+
+async def delete_attendance_calendar_event(event_date: str) -> bool:
+    db = get_db()
+    target_date = normalize_date_str(event_date)
+    matching_ids = []
+    async for event in db.attendance_calendar.find({}):
+        if normalize_date_str(event.get("event_date")) == target_date:
+            matching_ids.append(event.get("_id"))
+    deleted = False
+    for event_id in matching_ids:
+        if event_id is not None:
+            result = await db.attendance_calendar.delete_one({"_id": event_id})
+            deleted = deleted or result.deleted_count > 0
+    return deleted
+
+
 class AssignedSite(BaseModel):
     name: str
     lat: float = Field(ge=-90, le=90)
@@ -82,9 +141,10 @@ class RosterEntry(BaseModel):
     designation: str | None = None
     location_check_enabled: bool = True
     assigned_site: AssignedSite | None = None
-    geofence_radius_km: float = Field(default=10.0, gt=0, allow_inf_nan=False)
+    geofence_radius_km: float = Field(default=8.0, gt=0, allow_inf_nan=False)
     shift_start: str | None = None
     shift_end: str | None = None
+    shift_allowed_minutes: int | None = None
     shift_grace_minutes: int | None = None
 
 
@@ -98,14 +158,16 @@ class EmployeeRegistrationRequest(BaseModel):
     designation: str | None = None
     location_check_enabled: bool = True
     assigned_site: AssignedSite | None = None
-    geofence_radius_km: float = Field(default=10.0, gt=0, allow_inf_nan=False)
+    geofence_radius_km: float = Field(default=8.0, gt=0, allow_inf_nan=False)
     shift_start: str | None = None
     shift_end: str | None = None
+    shift_allowed_minutes: int | None = Field(default=None, ge=0, le=1440)
     shift_grace_minutes: int | None = None
 
 
 class EmployeeUpdateRequest(BaseModel):
     phone_number: Optional[str] = None
+    name: Optional[str] = None
     role: Optional[Literal["FS", "LS", "LSS"]] = None
     pc_id: Optional[str] = None
     parent_employee_id: Optional[str] = None
@@ -116,6 +178,7 @@ class EmployeeUpdateRequest(BaseModel):
     geofence_radius_km: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     shift_start: Optional[str] = None
     shift_end: Optional[str] = None
+    shift_allowed_minutes: Optional[int] = Field(default=None, ge=0, le=1440)
     shift_grace_minutes: Optional[int] = None
     is_active: Optional[bool] = None
 
@@ -431,6 +494,7 @@ async def register_employee(request: EmployeeRegistrationRequest) -> RosterEntry
         "geofence_radius_km": request.geofence_radius_km,
         "shift_start": request.shift_start if request.shift_start is not None else role_shift_defaults(request.role)["shift_start"],
         "shift_end": request.shift_end if request.shift_end is not None else role_shift_defaults(request.role)["shift_end"],
+        "shift_allowed_minutes": request.shift_allowed_minutes if request.shift_allowed_minutes is not None else role_shift_defaults(request.role)["shift_allowed_minutes"],
         "shift_grace_minutes": request.shift_grace_minutes if request.shift_grace_minutes is not None else role_shift_defaults(request.role)["shift_grace_minutes"],
     }
     try:
@@ -651,25 +715,56 @@ async def list_attendance(
     date_from: str | None = None,
     date_to: str | None = None,
     search: str | None = None,
+    area: str | None = None,
+    attendance_status: str | None = None,
+    include_coordinator_attendance: bool = False,
+    role: str | None = None,
     page: int = 1,
     page_size: int = 50,
 ) -> tuple[list[dict], int]:
     db = get_db()
-    query: dict = {
-        "review_status": {"$ne": "superseded"},
-        "person_role": {"$ne": "PC"},
-    }
+    query: dict = {"review_status": {"$ne": "superseded"}}
     coordinator_ids = [
         coordinator.pc_id
         for coordinator in (await list_coordinators(page_size=100_000))[0]
     ]
-    if coordinator_ids:
-        query["$nor"] = [{"employee_id": {"$in": coordinator_ids}}]
+    if include_coordinator_attendance:
+        query["$or"] = [
+            {
+                "employee_id": {"$nin": coordinator_ids},
+                "entry_type": {"$ne": "coordinator_manual"},
+            },
+            {
+                "employee_id": {"$in": coordinator_ids},
+                "person_role": "PC",
+                "entry_type": "coordinator_manual",
+            },
+        ]
+    else:
+        query["person_role"] = {"$nin": ["PC"]}
+        query["entry_type"] = {"$ne": "coordinator_manual"}
+        if coordinator_ids:
+            query["$nor"] = [{"employee_id": {"$in": coordinator_ids}}]
+
+    if role == "PC":
+        query["person_role"] = "PC"
+        query["entry_type"] = "coordinator_manual"
+    elif role is not None:
+        query["person_role"] = role
 
     if employee_id is not None:
         query["employee_id"] = employee_id
     if verdict is not None:
         query["verdict"] = verdict
+        # "Flagged" means awaiting a manual decision. Resolved submissions
+        # keep their original verdict for audit history, but are no longer
+        # part of the active flagged queue.
+        if verdict == "flagged":
+            query["review_status"] = "pending"
+    if attendance_status is not None and attendance_status not in {
+        "present", "late", "absent", "flagged",
+    }:
+        raise ValueError("attendance_status must be present, late, absent, or flagged")
 
     if date_from is not None or date_to is not None:
         date_conditions = []
@@ -689,15 +784,20 @@ async def list_attendance(
                     {"received_at_utc": {"$lte": norm_to + "T23:59:59.999999"}},
                 ]
             })
-        if len(date_conditions) == 1:
-            query.update(date_conditions[0])
-        elif len(date_conditions) > 1:
-            query["$and"] = date_conditions
+        existing_or = query.pop("$or", None)
+        combined_conditions = ([{"$or": existing_or}] if existing_or else []) + date_conditions
+        if len(combined_conditions) == 1:
+            query.update(combined_conditions[0])
+        elif combined_conditions:
+            query.setdefault("$and", []).extend(combined_conditions)
 
     if pc_id is not None:
         employee_ids = [pc_id]
         employee_ids.extend(e.employee_id for e in await list_employees_by_pc(pc_id))
         query["employee_id"] = {"$in": employee_ids}
+
+    if area:
+        query["area"] = area
 
     if search:
         matching, _ = await list_employees(search=search, page=1, page_size=10_000)
@@ -710,20 +810,224 @@ async def list_attendance(
         else:
             query["employee_id"] = {"$in": matched_ids}
 
-    total = await db.submissions.count_documents(query)
     skip = (page - 1) * page_size
     results = []
-    async for doc in (
-        db.submissions.find(query)
-        .sort([("received_at_utc", -1), ("_id", -1)])
-        .skip(skip)
-        .limit(page_size)
+    cursor = db.submissions.find(query).sort([("received_at_utc", -1), ("_id", -1)])
+    if attendance_status is None:
+        total = await db.submissions.count_documents(query)
+        cursor = cursor.skip(skip).limit(page_size)
+        async for doc in cursor:
+            doc["_id"] = str(doc["_id"])
+            if not doc.get("attendance_date"):
+                doc["attendance_date"] = normalize_date_str(doc.get("received_at_utc"))
+            results.append(doc)
+    else:
+        # Filter on the effective attendance status. An override must take
+        # precedence over the submission's original attendance_status, just
+        # as it does in the attendance grid and Excel export.
+        all_records = []
+        async for doc in cursor:
+            doc["_id"] = str(doc["_id"])
+            if not doc.get("attendance_date"):
+                doc["attendance_date"] = normalize_date_str(doc.get("received_at_utc"))
+            all_records.append(doc)
+
+        override_keys = [
+            {"employee_id": doc["employee_id"], "attendance_date": doc["attendance_date"]}
+            for doc in all_records
+            if doc.get("employee_id") and doc.get("attendance_date")
+        ]
+        overrides_by_key = {}
+        if override_keys:
+            async for override in db.attendance_overrides.find({"$or": override_keys}):
+                overrides_by_key[(override["employee_id"], override["attendance_date"])] = override
+
+        override_status_codes = {
+            "present": {"P", "M", "HD"},
+            "late": {"L"},
+            "absent": {"A", "AL"},
+            "flagged": {"F"},
+        }[attendance_status]
+        from app.services.attendance_calendar import calendar_codes_for_days
+        calendar_data = await get_attendance_calendar_data()
+        calendar_codes = calendar_codes_for_days(
+            [doc.get("attendance_date", "") for doc in all_records], calendar_data
+        )
+        matching_records = []
+        for doc in all_records:
+            key = (doc.get("employee_id"), doc.get("attendance_date"))
+            override = overrides_by_key.get(key)
+            calendar_code = calendar_codes.get(doc.get("attendance_date"))
+            if override is not None:
+                matches = override.get("attendance_code") in override_status_codes
+            elif calendar_code and doc.get("entry_type") == "coordinator_manual" and doc.get("defaulted"):
+                matches = calendar_code in override_status_codes
+            elif attendance_status == "flagged":
+                matches = (
+                    doc.get("verdict") == "flagged"
+                    and doc.get("review_status") == "pending"
+                )
+            elif attendance_status == "present":
+                matches = doc.get("attendance_status") == "present"
+            elif attendance_status == "late":
+                matches = doc.get("attendance_status") == "late"
+            else:
+                matches = doc.get("attendance_status") in {"absent", "absent_late"}
+            if matches:
+                matching_records.append(doc)
+
+        total = len(matching_records)
+        results = matching_records[skip:skip + page_size]
+    return results, total
+
+
+async def list_coordinator_attendance(
+    *, pc_id: str | None = None, date_from: str | None = None,
+    date_to: str | None = None, attendance_status: str | None = None,
+    search: str | None = None, page: int = 1, page_size: int = 25,
+) -> tuple[list[dict], int]:
+    db = get_db()
+    query: dict = {"person_role": "PC", "entry_type": "coordinator_manual"}
+    if pc_id:
+        query["employee_id"] = pc_id
+    if attendance_status not in {None, "present", "absent", "week_off", "holiday"}:
+        raise ValueError("attendance_status must be present, absent, week_off, or holiday")
+    if date_from:
+        query["attendance_date"] = {"$gte": normalize_date_str(date_from)}
+    if date_to:
+        query.setdefault("attendance_date", {})["$lte"] = normalize_date_str(date_to)
+    if search:
+        matching, _ = await list_coordinators(search=search, page_size=100_000)
+        ids = [item.pc_id for item in matching]
+        if "employee_id" in query:
+            ids = [item for item in ids if item == query["employee_id"]]
+        query["employee_id"] = {"$in": ids}
+    records = []
+    async for doc in db.submissions.find(query).sort(
+        [("attendance_date", -1), ("_id", -1)]
     ):
         doc["_id"] = str(doc["_id"])
-        if not doc.get("attendance_date"):
-            doc["attendance_date"] = normalize_date_str(doc.get("received_at_utc"))
-        results.append(doc)
-    return results, total
+        records.append(doc)
+    if date_from or date_to:
+        from app.services.attendance_calendar import calendar_codes_for_days
+        calendar_data = await get_attendance_calendar_data(date_from, date_to)
+        calendar_days = sorted({record.get("attendance_date") for record in records if record.get("attendance_date")})
+        calendar_codes = calendar_codes_for_days(calendar_days, calendar_data)
+        code_status = {"WO": ("WO", "week_off"), "H": ("H", "holiday")}
+        for record in records:
+            day = record.get("attendance_date")
+            calendar_code = calendar_codes.get(day)
+            if record.get("defaulted") and calendar_code:
+                record["attendance_code"], record["attendance_status"] = code_status[calendar_code]
+    if attendance_status:
+        from app.services.attendance_calendar import calendar_codes_for_days
+        calendar_data = await get_attendance_calendar_data(date_from, date_to)
+        calendar_codes = calendar_codes_for_days(
+            [record.get("attendance_date", "") for record in records], calendar_data
+        )
+        code_status = {"WO": ("WO", "week_off"), "H": ("H", "holiday")}
+        for record in records:
+            calendar_code = calendar_codes.get(record.get("attendance_date"))
+            if record.get("defaulted") and calendar_code:
+                record["attendance_code"], record["attendance_status"] = code_status[calendar_code]
+        records = [record for record in records if record.get("attendance_status") == attendance_status]
+    elif records:
+        from app.services.attendance_calendar import calendar_codes_for_days
+        calendar_data = await get_attendance_calendar_data(date_from, date_to)
+        calendar_codes = calendar_codes_for_days(
+            [record.get("attendance_date", "") for record in records], calendar_data
+        )
+        code_status = {"WO": ("WO", "week_off"), "H": ("H", "holiday")}
+        for record in records:
+            calendar_code = calendar_codes.get(record.get("attendance_date"))
+            if record.get("defaulted") and calendar_code:
+                record["attendance_code"], record["attendance_status"] = code_status[calendar_code]
+    total = len(records)
+    records = records[(page - 1) * page_size:page * page_size]
+    return records, total
+
+
+async def initialize_coordinator_attendance_defaults(
+    date: str, created_by: str,
+) -> int:
+    """Create missing default attendance records without changing existing choices."""
+    norm_date = normalize_date_str(date)
+    coordinators, _ = await list_coordinators(is_active=True, page_size=100_000)
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    calendar_data = await get_attendance_calendar_data(norm_date, norm_date)
+    from app.services.attendance_calendar import calendar_codes_for_days
+    default_code = calendar_codes_for_days([norm_date], calendar_data).get(norm_date, "P")
+    for coordinator in coordinators:
+        query = {
+            "employee_id": coordinator.pc_id,
+            "attendance_date": norm_date,
+            "entry_type": "coordinator_manual",
+        }
+        fields = _coordinator_attendance_fields(
+            coordinator, norm_date, default_code, "", created_by, now, defaulted=True
+        )
+        # SQL-backed find_one_and_update is transaction-locked and makes this
+        # safe to call repeatedly or when two admins open the page together.
+        await db.submissions.find_one_and_update(
+            query, {"$setOnInsert": fields}, return_document=True, upsert=True
+        )
+    return len(coordinators)
+
+
+def _coordinator_attendance_fields(
+    coordinator: Coordinator, date: str, attendance_code: str,
+    reason: str, created_by: str, now: str, *, defaulted: bool,
+) -> dict:
+    attendance_status = {
+        "P": "present", "A": "absent", "WO": "week_off", "H": "holiday",
+    }[attendance_code]
+    return {
+        "employee_id": coordinator.pc_id, "employee_name": coordinator.name,
+        "person_role": "PC", "pc_id": coordinator.pc_id, "attendance_date": date,
+        "area": None,
+        "attendance_status": attendance_status,
+        "attendance_code": attendance_code, "verdict": "verified",
+        "review_status": "n/a", "entry_type": "coordinator_manual",
+        "created_by": created_by, "reason": reason,
+        "defaulted": defaulted,
+        "shift_status": None, "received_at_utc": now,
+        "updated_at_utc": now,
+        "sender_phone": None, "caption": None, "media_url": None,
+        "image_hash": None, "overlay": None, "geofence_passed": None,
+        "geofence_distance_m": None, "face_present": None,
+        "face_count": None, "identity_verdict": None,
+        "identity_score": None, "issues": [], "flag_reason": None,
+    }
+
+
+async def save_coordinator_attendance(
+    pc_id: str, date: str, attendance_code: str, reason: str | None, created_by: str,
+) -> dict:
+    if attendance_code not in {"P", "A", "WO", "H"}:
+        raise ValueError("attendance_code must be P, A, WO, or H")
+    coordinator = await get_coordinator_by_id(pc_id)
+    if coordinator is None:
+        raise ValueError(f"No project coordinator found with ID: {pc_id}")
+    if not coordinator.is_active:
+        raise ValueError("Cannot record attendance for an inactive project coordinator")
+    norm_date = normalize_date_str(date)
+    db = get_db()
+    query = {"employee_id": pc_id, "attendance_date": norm_date, "entry_type": "coordinator_manual"}
+    existing = await db.submissions.find_one(query)
+    now = datetime.now(timezone.utc).isoformat()
+    fields = _coordinator_attendance_fields(
+        coordinator, norm_date, attendance_code, (reason or "").strip(),
+        created_by, now, defaulted=False,
+    )
+    if existing:
+        await db.submissions.update_one({"_id": existing["_id"]}, {"$set": fields})
+        updated = await db.submissions.find_one({"_id": existing["_id"]})
+        updated["_id"] = str(updated["_id"])
+        return updated
+    result = await db.submissions.insert_one(fields)
+    fields["_id"] = str(result.inserted_id)
+    return fields
 
 
 async def delete_attendance_submission(submission_id: str) -> bool:
@@ -918,6 +1222,34 @@ async def get_submissions_grouped(
             "attendance_code": override["attendance_code"],
             "entry_type": "override",
         }
+
+    return result
+
+
+async def get_coordinator_attendance_grouped(
+    coordinator_ids: list[str],
+    date_from: str,
+    date_to: str,
+) -> dict[str, dict[str, dict]]:
+    """Return saved manual coordinator attendance, keyed by coordinator and date."""
+    db = get_db()
+    result: dict[str, dict[str, dict]] = {pc_id: {} for pc_id in coordinator_ids}
+    if not coordinator_ids:
+        return result
+
+    norm_from = normalize_date_str(date_from)
+    norm_to = normalize_date_str(date_to)
+    cursor = db.submissions.find({
+        "employee_id": {"$in": coordinator_ids},
+        "person_role": "PC",
+        "entry_type": "coordinator_manual",
+        "attendance_date": {"$gte": norm_from, "$lte": norm_to},
+    })
+    async for doc in cursor:
+        pc_id = doc.get("employee_id")
+        day = doc.get("attendance_date")
+        if pc_id in result and day:
+            result[pc_id][day] = doc
 
     return result
 
