@@ -9,6 +9,9 @@ _STATIC_LABELS = {
     "unregistered_phone_number": "Unregistered phone number — no roster match",
     "photo_timestamp_missing": "Could not read the photo date/time",
     "overlay_extraction_incomplete": "Could not read location/time from photo overlay",
+    "photo_gps_missing": "Photo has no GPS location metadata; check the employee's device location setting",
+    "face_too_small": "Face occupies too little of the photo; ask the employee to move closer and keep the face centered",
+    "image_too_blurry": "Photo is too blurry to verify; ask the employee to hold the camera steady",
     "no_face_detected": "No face detected in photo",
     "not_enrolled": "Employee not yet enrolled for face verification",
     "employee_inactive": "Submission from a deactivated employee",
@@ -56,6 +59,8 @@ def _format_one(issue: str) -> str:
         return f"Face verification {label}"
 
     if match := re.match(r"liveness_(.+)", issue):
+        if match.group(1).startswith("face_too_small"):
+            return "Anti-spoofing warning: face is too small; move closer and keep the face centered"
         return f"Anti-spoofing warning: {match.group(1)}"
 
     return issue

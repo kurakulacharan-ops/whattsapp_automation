@@ -1,18 +1,17 @@
 import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
-import { CalendarCheck, Users, Share2, PanelLeftClose, PanelLeftOpen, LogOut, UserRoundCog } from 'lucide-react';
+import { CalendarCheck, CalendarDays, Users, Share2, PanelLeftClose, PanelLeftOpen, LogOut, UserRoundCog } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const NAV_ITEMS = [
   { to: '/attendance', label: 'Attendance', icon: CalendarCheck },
   { to: '/employees', label: 'Attendance Participants', icon: Users },
-  { to: '/coordinators', label: 'Project Co-Ordinators', icon: Share2 },
 ];
 
 export function Layout() {
   const { logout, canManage } = useAuth();
   const navItems = canManage
-    ? [...NAV_ITEMS, { to: '/users', label: 'User access', icon: UserRoundCog }]
+    ? [...NAV_ITEMS, { to: '/coordinators', label: 'Project Co-Ordinators', icon: Share2 }, { to: '/coordinator-attendance', label: 'Coordinator Attendance', icon: CalendarCheck }, { to: '/attendance-calendar', label: 'Holiday & Week-off Calendar', icon: CalendarDays }, { to: '/users', label: 'User access', icon: UserRoundCog }]
     : NAV_ITEMS;
   // "pinned" is the toggle-button state (persists until clicked again).
   // "hovered" is a temporary expand-on-hover while collapsed — mirrors the

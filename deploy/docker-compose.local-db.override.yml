@@ -1,0 +1,38 @@
+x-local-db-environment: &local-db-environment
+  ENVIRONMENT: development
+  DB_BACKEND: mssql
+  MSSQL_SERVER: sqlserver
+  MSSQL_DATABASE: attendance_local
+  MSSQL_DRIVER: ODBC Driver 18 for SQL Server
+  MSSQL_TRUSTED_CONNECTION: "false"
+  MSSQL_USERNAME: sa
+  MSSQL_PASSWORD: ${MSSQL_PASSWORD:?Use the local-dev runtime.local.env}
+  MSSQL_ENCRYPT: "false"
+  MSSQL_TRUST_SERVER_CERTIFICATE: "true"
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Use the local-dev runtime.local.env}
+  INTERAKT_API_KEY: ""
+  INTERAKT_WEBHOOK_SECRET: ""
+
+x-local-db-networks: &local-db-networks
+  - default
+  - local-db
+
+services:
+  backend:
+    environment: *local-db-environment
+    networks: *local-db-networks
+  worker:
+    environment: *local-db-environment
+    networks: *local-db-networks
+  absence-worker:
+    environment: *local-db-environment
+    networks: *local-db-networks
+  notification-worker:
+    environment: *local-db-environment
+    networks: *local-db-networks
+
+networks:
+  default: {}
+  local-db:
+    external: true
+    name: attendance-local-dev_local

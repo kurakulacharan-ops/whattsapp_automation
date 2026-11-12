@@ -91,7 +91,7 @@ export function EnrollFaceModal({ employee, onClose }: { employee: Employee; onC
             : existingCount > 0
               ? `${existingCount} face reference photo(s) are currently enrolled. A successful enrollment replaces them.`
               : 'No face references are currently enrolled.'}
-         </p>
+        </p>
         {submitting && (
           <p role="status" className="text-xs mb-3" style={{ color: 'var(--color-ink-muted)' }}>
             Photos are uploading and being processed. Keep this dialog open until enrollment finishes.

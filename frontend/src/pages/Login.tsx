@@ -16,17 +16,18 @@ export function LoginPage() {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
-
     try {
       await login(username.trim(), password);
       navigate("/attendance");
     } catch (err) {
       if (axios.isAxiosError(err)) {
         if (!err.response) {
-          setError("Could not reach the server. Please check your connection and try again.");
+          setError(
+            "Could not reach the backend. Is it running, and is the dev proxy target correct?",
+          );
         } else if (err.response.status === 401 || err.response.status === 403) {
-          setError("Username or password is incorrect.");
-        } else if ([502, 503, 504].includes(err.response.status)) {
+          setError("Username, password, or API key is incorrect.");
+        } else if (err.response.status === 502 || err.response.status === 503 || err.response.status === 504) {
           setError("The server is taking too long to respond. Please wait a moment and try again.");
         } else {
           setError(`Login failed (${err.response.status}). Please try again or contact support.`);
@@ -50,6 +51,8 @@ export function LoginPage() {
         backgroundRepeat: "no-repeat",
       }}
     >
+      {/* Positioned at the horizontal rule-of-thirds line (2/3 across),
+          vertically centered — not dead-center on the page. */}
       <form
         onSubmit={handleSubmit}
         className="absolute w-full max-w-sm rounded-xl border p-8 shadow-lg"
@@ -129,7 +132,7 @@ export function LoginPage() {
           />
           <button
             type="button"
-            onClick={() => setShowPassword((value) => !value)}
+            onClick={() => setShowPassword((v) => !v)}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-xs"
             style={{ color: "var(--color-ink-muted)" }}
           >
@@ -138,7 +141,7 @@ export function LoginPage() {
         </div>
 
         {error && (
-          <p className="text-xs mb-4" role="alert" style={{ color: "var(--color-absent)" }}>
+          <p className="text-xs mb-4" style={{ color: "var(--color-absent)" }}>
             {error}
           </p>
         )}

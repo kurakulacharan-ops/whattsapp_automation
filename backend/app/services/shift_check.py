@@ -1,13 +1,14 @@
 """
 Checks whether the OCR'd selfie timestamp falls within the allowed
-check-in window. Per-employee shift_start/shift_end/shift_grace_minutes
+check-in window. Per-employee shift_start/shift_end/shift_allowed_minutes/
+shift_grace_minutes
 (set via PATCH /employees/{id}) override the role defaults
 when present — most employees use the default, but a site with a
 different shift pattern can be set individually.
 
 Returns a shift status:
-  "on_time"        -> at or before shift start
-  "late"           -> after shift start but within grace_minutes —
+  "on_time"        -> through allowed_minutes after shift start
+  "late"           -> after allowed_minutes but within grace_minutes —
                        NOT a failure, doesn't get flagged for admin review,
                        just shows as "L" instead of "P" in the export
   "after_grace"    -> after the grace period — attendance is classified as AL,
@@ -48,8 +49,8 @@ def _parse_hhmm(value: str) -> time | None:
 
 def role_shift_defaults(role: str | None) -> dict:
     if role == "LSS":
-        return {"shift_start": "07:00", "shift_end": "15:00", "shift_grace_minutes": 60}
-    return {"shift_start": "09:00", "shift_end": "19:00", "shift_grace_minutes": 240}
+        return {"shift_start": "07:00", "shift_end": "15:00", "shift_allowed_minutes": 60, "shift_grace_minutes": 60}
+    return {"shift_start": "09:00", "shift_end": "19:00", "shift_allowed_minutes": 60, "shift_grace_minutes": 240}
 
 
 def check_shift_window(
@@ -58,6 +59,7 @@ def check_shift_window(
     employee_shift_end: str | None = None,
     employee_grace_minutes: int | None = None,
     employee_role: str | None = None,
+    employee_allowed_minutes: int | None = None,
 ) -> tuple[str, str]:
     """
     Returns (status, reason). Caller decides whether the status should add
@@ -70,6 +72,11 @@ def check_shift_window(
         employee_grace_minutes
         if employee_grace_minutes is not None
         else defaults["shift_grace_minutes"]
+    )
+    allowed = (
+        employee_allowed_minutes
+        if employee_allowed_minutes is not None
+        else defaults["shift_allowed_minutes"]
     )
 
     shift_start = _parse_hhmm(start_str)
@@ -87,10 +94,14 @@ def check_shift_window(
     start_minutes = shift_start.hour * 60 + shift_start.minute
     end_minutes = shift_end.hour * 60 + shift_end.minute
 
-    # At/before start: P; after start through grace: L; beyond grace: AL.
-    # A check-in after shift end is also AL, not present.
-    if submitted_minutes <= start_minutes:
-        return "on_time", "Check-in at or before shift start"
-    if submitted_minutes <= start_minutes + max(0, grace) and submitted_minutes <= end_minutes:
+    # Windows are half-open: allowed [start,start+allowed), late
+    # [start+allowed,start+allowed+grace), then absent through shift end.
+    if submitted_minutes < start_minutes + max(0, allowed) and submitted_minutes < end_minutes:
+        return "on_time", "Check-in within allowed time"
+    late_start = start_minutes + max(0, allowed)
+    late_end = min(late_start + max(0, grace), end_minutes)
+    if late_start <= submitted_minutes < late_end:
         return "late", "Check-in within grace period"
+    if submitted_minutes >= end_minutes:
+        return "after_window", "Check-in at or after shift end (absent)"
     return "after_grace", "Check-in after grace period (AL)"

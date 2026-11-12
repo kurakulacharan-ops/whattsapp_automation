@@ -8,12 +8,15 @@ from app import notification_worker as worker
 
 
 class NotificationPolicyTests(unittest.IsolatedAsyncioTestCase):
-    async def test_routine_results_do_not_queue_employee_replies(self):
+    async def test_final_attendance_statuses_queue_bilingual_employee_replies(self):
         payload = SimpleNamespace(data=SimpleNamespace(customer=SimpleNamespace(country_code="+91", phone_number="test")))
         for status, verdict in [("present", "verified"), ("late", "verified"), ("absent", "inactive_account")]:
             with self.subTest(status=status), patch("app.services.ingestion._queue_notification", new_callable=AsyncMock) as queue:
                 await queue_submission_notifications("event", payload, {"verdict":verdict, "attendance_status":status})
-                self.assertFalse(any(c.args[0]["kind"] == "employee_reply" for c in queue.await_args_list))
+                replies = [c.args[0] for c in queue.await_args_list if c.args[0]["kind"] == "employee_reply"]
+                self.assertEqual(len(replies), 1)
+                self.assertIn("\n", replies[0]["message"])
+                self.assertTrue(any(marker in replies[0]["message"] for marker in ("✅", "🕒", "⚠️")))
 
     async def test_flag_and_absent_late_queue_correct_reply(self):
         payload = SimpleNamespace(data=SimpleNamespace(customer=SimpleNamespace(country_code="+91", phone_number="test")))
@@ -32,8 +35,10 @@ class NotificationPolicyTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(expected, replies[0]["message"])
                 self.assertNotIn("Attendance recorded", replies[0]["message"])
 
-    def test_successful_replacement_silent_and_flag_takes_priority(self):
-        self.assertIsNone(build_submission_reply({"verdict":"verified", "attendance_status":"present", "previous_flagged_attempts":[{}]}))
+    def test_successful_replacement_reply_and_flag_takes_priority(self):
+        reply = build_submission_reply({"verdict":"verified", "attendance_status":"present", "previous_flagged_attempts":[{}]})
+        self.assertIn("Your replacement photo was accepted.", reply)
+        self.assertIn("तुमचा पर्यायी फोटो स्वीकारला आहे.", reply)
         self.assertIn("Face verification failed", build_submission_reply({"verdict":"flagged", "attendance_status":"absent_late", "issues":["face_mismatch"]}))
 
     async def run_worker(self, submission):
@@ -45,12 +50,17 @@ class NotificationPolicyTests(unittest.IsolatedAsyncioTestCase):
         redis.xack.assert_awaited_once()
         return skipped, sent, send
 
-    async def test_pending_routine_and_obsolete_jobs_are_skipped(self):
-        for submission in [None, {"verdict":"verified", "attendance_status":"present"}, {"verdict":"verified", "attendance_status":"late"}, {"verdict":"inactive_account", "attendance_status":"absent"}]:
-            skipped, sent, send = await self.run_worker(submission)
-            skipped.assert_awaited_once()
-            sent.assert_not_awaited()
-            send.assert_not_awaited()
+    async def test_pending_obsolete_job_is_skipped_and_final_statuses_are_sent(self):
+        skipped, sent, send = await self.run_worker(None)
+        skipped.assert_awaited_once()
+        sent.assert_not_awaited()
+        send.assert_not_awaited()
+        for status, verdict in [("present", "verified"), ("late", "verified"), ("absent", "inactive_account")]:
+            skipped, sent, send = await self.run_worker({"verdict": verdict, "attendance_status": status})
+            skipped.assert_not_awaited()
+            sent.assert_awaited_once()
+            send.assert_awaited_once()
+            self.assertIn("\n", send.await_args.args[2])
 
     async def test_pending_absent_late_reply_is_rebuilt(self):
         skipped, sent, send = await self.run_worker({"verdict":"verified", "attendance_status":"absent_late"})

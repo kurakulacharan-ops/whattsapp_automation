@@ -158,11 +158,9 @@ class PhotoDateValidationTests(unittest.TestCase):
             "flagged", "Employee", ["date_mismatch_2026-10-14"]
         )
         self.assertIn("attendance is not confirmed", reply)
-        self.assertEqual(
-            reply,
-            "⚠️ Your attendance photo could not be verified, so attendance is not confirmed. "
-            "Reason: Photo date mismatch.",
-        )
+        self.assertIn("Reason: Photo date mismatch.", reply)
+        self.assertIn("तुमचा उपस्थितीचा फोटो पडताळता आला नाही", reply)
+        self.assertIn("फोटोवरील तारीख जुळत नाही", reply)
 
     def test_success_reply_mentions_reason_when_replacement_is_accepted(self):
         reply = build_reply_message(
@@ -171,10 +169,9 @@ class PhotoDateValidationTests(unittest.TestCase):
             [],
             [{"issues": ["date_mismatch_2026-10-14"]}],
         )
-        self.assertEqual(
-            reply,
-            "✅ Attendance recorded, Employee. Thanks! Your replacement photo was accepted.",
-        )
+        self.assertIn("✅ Attendance recorded, Employee. Thanks!", reply)
+        self.assertIn("Your replacement photo was accepted.", reply)
+        self.assertIn("तुमचा पर्यायी फोटो स्वीकारला आहे.", reply)
 
     def test_replacement_history_preserves_earlier_attempts_and_current_flag(self):
         submission = {
@@ -361,7 +358,7 @@ class AttendanceListTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             workbook.sheetnames,
-            ["Summary", "Project Coordinators", "Field Supervisors", "Local supervisors", "Local supervisor scanning"],
+            ["Summary", "Project Coordinators", "Project Coordinator Attendance", "Field Supervisors", "Local supervisors", "Local supervisor scanning"],
         )
         self.assertEqual(workbook["Field Supervisors"].max_row, 2)
         self.assertEqual(workbook["Summary"]["B4"].value, 1)

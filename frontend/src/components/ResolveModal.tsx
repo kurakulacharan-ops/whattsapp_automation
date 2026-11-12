@@ -9,7 +9,7 @@ export function ResolveModal({
 }: {
   record: AttendanceRecord;
   onClose: () => void;
-  onResolved: (updated: AttendanceRecord) => void;
+  onResolved: (updated: AttendanceRecord) => void | Promise<void>;
 }) {
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState<'approved' | 'rejected' | null>(null);
@@ -20,7 +20,7 @@ export function ResolveModal({
     setError(null);
     try {
       const updated = await resolveAttendance(record._id, decision, reason || undefined);
-      onResolved(updated);
+      await onResolved(updated);
     } catch {
       setError('Could not save this decision. Try again.');
       setSubmitting(null);
@@ -28,12 +28,11 @@ export function ResolveModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
       <div
-        className="w-full max-w-md rounded-lg border p-6 shadow-xl"
-        style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface-raised)' }}
+        className="modal w-full max-w-md p-6"
       >
-        <h2 className="text-base font-medium mb-1" style={{ color: 'var(--color-ink)' }}>
+        <h2 className="text-lg font-extrabold mb-1" style={{ color: 'var(--color-ink)' }}>
           Review flagged submission
         </h2>
         <p className="text-sm mb-4" style={{ color: 'var(--color-ink-muted)' }}>
@@ -48,7 +47,7 @@ export function ResolveModal({
           )}
         </div>
 
-        <label className="block text-xs mb-1" style={{ color: 'var(--color-ink-muted)' }}>
+        <label className="field-label">
           Reason (optional)
         </label>
         <textarea
@@ -72,24 +71,21 @@ export function ResolveModal({
         <div className="flex gap-2 justify-end">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 rounded-md text-sm"
-            style={{ color: 'var(--color-ink-muted)' }}
+            className="btn btn-ghost"
           >
             Cancel
           </button>
           <button
             onClick={() => handleDecision('rejected')}
             disabled={submitting !== null}
-            className="px-3 py-1.5 rounded-md text-sm font-medium disabled:opacity-50"
-            style={{ background: 'var(--color-absent-bg)', color: 'var(--color-absent)' }}
+            className="btn btn-danger"
           >
             {submitting === 'rejected' ? 'Marking absent…' : 'Mark absent'}
           </button>
           <button
             onClick={() => handleDecision('approved')}
             disabled={submitting !== null}
-            className="px-3 py-1.5 rounded-md text-sm font-medium disabled:opacity-50"
-            style={{ background: 'var(--color-present)', color: 'white' }}
+            className="btn btn-success"
           >
             {submitting === 'approved' ? 'Marking present…' : 'Mark present'}
           </button>

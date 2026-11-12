@@ -48,6 +48,11 @@ def marker_for_submission(sub: dict | None) -> str:
     if sub.get("attendance_code"):
         return sub["attendance_code"]
 
+    if sub.get("attendance_status") == "week_off":
+        return "WO"
+    if sub.get("attendance_status") == "holiday":
+        return "H"
+
     if sub.get("verdict") == "inactive_account":
         return "N/A"
 
@@ -108,6 +113,7 @@ def compute_employee_grid(
     submissions_by_date: dict,
     days: list[str],
     today: str | None = None,
+    calendar_codes: dict[str, str] | None = None,
 ) -> dict[str, str] | None:
     """Return one non-empty attendance marker for every date in the range."""
     if not days:
@@ -120,6 +126,7 @@ def compute_employee_grid(
         today = _today_local()
 
     grid = {}
+    calendar_codes = calendar_codes or {}
 
     for day in days:
         if deactivated_at and day > deactivated_at[:10]:
@@ -129,7 +136,15 @@ def compute_employee_grid(
         submission = submissions_by_date.get(day)
 
         if submission is not None:
-            grid[day] = marker_for_submission(submission)
+            calendar_code = calendar_codes.get(day)
+            # A scheduled non-working day replaces only the synthetic system
+            # absence. Actual attendance and explicit admin overrides win.
+            if calendar_code and submission.get("entry_type") == "system":
+                grid[day] = calendar_code
+            else:
+                grid[day] = marker_for_submission(submission)
+        elif day in calendar_codes:
+            grid[day] = calendar_codes[day]
         elif day < today:
             grid[day] = "A"
         else:

@@ -23,6 +23,7 @@ export function EmployeesPage() {
   const [pcFilter, setPcFilter] = useState(
     () => new URLSearchParams(window.location.search).get('pc_id') ?? ''
   );
+  const [roleFilter, setRoleFilter] = useState('');
   const [areaFilter, setAreaFilter] = useState(
     () => new URLSearchParams(window.location.search).get('area') ?? ''
   );
@@ -38,9 +39,26 @@ export function EmployeesPage() {
     setLoading(true);
     setError(null);
     try {
+      if (roleFilter === 'PC') {
+        const result = await listCoordinators({
+          is_active: showInactive ? undefined : true,
+          search: search || undefined,
+          page,
+          page_size: PAGE_SIZE,
+        });
+        setCoordinators((current) => {
+          const byId = new Map(current.map((item) => [item.pc_id, item]));
+          result.coordinators.forEach((item) => byId.set(item.pc_id, item));
+          return [...byId.values()];
+        });
+        setEmployees([]);
+        setTotal(result.total);
+        return;
+      }
       const data = await listEmployees({
         pc_id: pcFilter || undefined,
         area: areaFilter || undefined,
+        role: (roleFilter || undefined) as 'FS' | 'LS' | 'LSS' | undefined,
         is_active: showInactive ? undefined : true,
         search: search || undefined,
         page,
@@ -53,7 +71,7 @@ export function EmployeesPage() {
     } finally {
       setLoading(false);
     }
-  }, [pcFilter, areaFilter, showInactive, search, page]);
+  }, [pcFilter, areaFilter, roleFilter, showInactive, search, page]);
 
   useEffect(() => {
     load();
@@ -61,7 +79,7 @@ export function EmployeesPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [pcFilter, areaFilter, showInactive, search]);
+  }, [pcFilter, areaFilter, roleFilter, showInactive, search]);
 
   useEffect(() => {
     Promise.all([
@@ -213,6 +231,20 @@ export function EmployeesPage() {
 
       <div className="flex gap-2 mb-5 items-center flex-wrap">
         <select
+          value={roleFilter}
+          onChange={(e) => { setRoleFilter(e.target.value); setPcFilter(''); setAreaFilter(''); }}
+          aria-label="Filter by role"
+          className="px-2 py-1.5 rounded-md text-sm border"
+          style={{ background: 'var(--color-surface-raised)', borderColor: 'var(--color-border)', color: 'var(--color-ink-muted)' }}
+        >
+          <option value="">All roles</option>
+          <option value="PC">Project Coordinator (PC)</option>
+          <option value="FS">Field Supervisor (FS)</option>
+          <option value="LS">Local Supervisor (LS)</option>
+          <option value="LSS">Local Supervisor Scanning (LSS)</option>
+        </select>
+        {roleFilter !== 'PC' && <>
+        <select
           value={pcFilter}
           onChange={(e) => setPcFilter(e.target.value)}
           className="px-2 py-1.5 rounded-md text-sm border"
@@ -229,6 +261,13 @@ export function EmployeesPage() {
             </option>
           ))}
         </select>
+        </>}
+        {roleFilter === 'PC' && (
+          <select value={pcFilter} onChange={(e) => setPcFilter(e.target.value)} className="px-2 py-1.5 rounded-md text-sm border" style={{ background: 'var(--color-surface-raised)', borderColor: 'var(--color-border)', color: 'var(--color-ink-muted)' }}>
+            <option value="">All coordinators</option>
+            {coordinators.map((c) => <option key={c.pc_id} value={c.pc_id}>{c.name}</option>)}
+          </select>
+        )}
         <select
           value={areaFilter}
           onChange={(e) => setAreaFilter(e.target.value)}
@@ -295,7 +334,21 @@ export function EmployeesPage() {
             </tr>
           </thead>
           <tbody>
-            {employees.map((emp, index) => (
+            {roleFilter === 'PC' ? coordinators
+              .filter((c) => (!pcFilter || c.pc_id === pcFilter) && (showInactive || c.is_active) && (!search || `${c.name} ${c.pc_id} ${c.phone_number ?? ''}`.toLowerCase().includes(search.toLowerCase())))
+              .map((pc, index) => (
+              <tr key={pc.pc_id} className="border-t" style={{ borderColor: 'var(--color-border-subtle)' }}>
+                <td className="px-4 py-2.5" style={{ color: 'var(--color-ink-muted)' }}>{(page - 1) * PAGE_SIZE + index + 1}</td>
+                <td className="px-4 py-2.5">{pc.pc_id}</td>
+                <td className="px-4 py-2.5">{pc.name}</td>
+                <td className="px-4 py-2.5">PC</td>
+                <td className="px-4 py-2.5">—</td>
+                <td className="px-4 py-2.5">—</td>
+                <td className="px-4 py-2.5">Project Coordinator</td>
+                <td className="px-4 py-2.5" style={{ color: pc.is_active ? 'var(--color-present)' : 'var(--color-inactive)' }}>{pc.is_active ? 'Active' : `Inactive since ${pc.deactivated_at}`}</td>
+                {canManage && <td className="px-4 py-2.5 text-right">—</td>}
+              </tr>
+            )) : employees.map((emp, index) => (
               <tr key={emp.employee_id} className="border-t" style={{ borderColor: 'var(--color-border-subtle)' }}>
                 <td className="px-4 py-2.5" style={{ color: 'var(--color-ink-muted)' }}>
                   {(page - 1) * PAGE_SIZE + index + 1}
@@ -375,7 +428,7 @@ export function EmployeesPage() {
                 </td>}
               </tr>
             ))}
-            {!loading && employees.length === 0 && (
+            {!loading && (roleFilter === 'PC' ? total === 0 : employees.length === 0) && (
               <tr>
                 <td colSpan={canManage ? 9 : 8} className="px-4 py-8 text-center text-sm" style={{ color: 'var(--color-ink-faint)' }}>
                   No attendance participants match these filters.

@@ -5,7 +5,7 @@ export interface EmployeeListParams {
   pc_id?: string;
   area?: string;
   designation?: string;
-  role?: Exclude<AttendanceRole, 'PC'>;
+  role?: AttendanceRole;
   parent_employee_id?: string;
   is_active?: boolean;
   page?: number;
@@ -44,6 +44,7 @@ export interface CreateEmployeePayload {
   geofence_radius_km?: number;
   shift_start?: string | null;
   shift_end?: string | null;
+  shift_allowed_minutes?: number | null;
   shift_grace_minutes?: number | null;
 }
 

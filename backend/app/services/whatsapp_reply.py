@@ -91,25 +91,19 @@ def build_reply_message(
     """
     if verdict == "verified":
         name = roster_name or "there"
-        message = f"✅ Attendance recorded, {name}. Thanks!"
+        message = f"✅ Attendance recorded, {name}. Thanks!\n✅ उपस्थिती नोंदवली आहे, {name}. धन्यवाद!"
         if previous_flagged_attempts:
-            message += " Your replacement photo was accepted."
+            message += "\nYour replacement photo was accepted.\nतुमचा पर्यायी फोटो स्वीकारला आहे."
         return message
     if "unregistered_phone_number" in issues or "employee_inactive" in issues:
         return (
-            "⚠️ Attendance could not be recorded. Your phone is not linked to an active account."
+            "⚠️ Attendance could not be recorded. Your phone is not linked to an active account.\n"
+            "⚠️ उपस्थिती नोंदवता आली नाही. तुमचा फोन सक्रिय खात्याशी जोडलेला नाही."
         )
     if "not_enrolled" in issues:
         return (
-            "⚠️ Your attendance photo could not be verified. Reason: Face enrollment is incomplete."
-        )
-    if "liveness_face_too_small" in issues:
-        return (
-            "⚠️ Your face looks too small in the photo. Please move closer, keep your full face visible, and try again."
-        )
-    if any(issue.startswith("identity_") for issue in issues):
-        return (
-            "⚠️ Your face was detected, but it did not match the saved enrollment. Please make sure the enrolled participant is taking the photo and try again."
+            "⚠️ Your attendance photo could not be verified. Reason: Face enrollment is incomplete.\n"
+            "⚠️ तुमचा उपस्थितीचा फोटो पडताळता आला नाही. कारण: चेहरा नोंदणी पूर्ण नाही."
         )
     if any(issue.startswith(("date_mismatch", "exif_date_mismatch", "possible_date_edit")) for issue in issues):
         reason = "Photo date mismatch"
@@ -132,21 +126,39 @@ def build_reply_message(
         reason = "Photo verification check failed"
     else:
         reason = "Photo details need review"
+    mr_reasons = {
+        "Photo date mismatch": "फोटोवरील तारीख जुळत नाही",
+        "Duplicate or reused photo": "डुप्लिकेट किंवा पुन्हा वापरलेला फोटो",
+        "Outside assigned range/city or location could not be verified": "नेमून दिलेल्या क्षेत्राबाहेर आहात किंवा ठिकाण पडताळता आले नाही",
+        "Face verification failed": "चेहरा पडताळता आला नाही",
+        "Photo date/time is missing or unclear": "फोटोवरील तारीख किंवा वेळ उपलब्ध नाही किंवा स्पष्ट नाही",
+        "Date, time, or location is missing or unclear": "तारीख, वेळ किंवा ठिकाण उपलब्ध नाही किंवा स्पष्ट नाही",
+        "Photo verification check failed": "फोटो पडताळणी अयशस्वी झाली",
+        "Photo details need review": "फोटोच्या तपशीलांची तपासणी आवश्यक आहे",
+    }
+    mr_reason = mr_reasons.get(reason, "फोटोच्या तपशीलांची तपासणी आवश्यक आहे")
     return (
         "⚠️ Your attendance photo could not be verified, so attendance is not confirmed. "
-        f"Reason: {reason}."
+        f"Reason: {reason}.\n"
+        f"⚠️ तुमचा उपस्थितीचा फोटो पडताळता आला नाही, त्यामुळे उपस्थिती निश्चित नाही. कारण: {mr_reason}."
     )
 
 def build_submission_reply(submission: dict) -> str | None:
-    """Only attendance exceptions warrant a paid employee reply."""
-    if submission.get("verdict") == "flagged":
-        return build_reply_message(
-            "flagged", submission.get("employee_name"), submission.get("issues") or []
-        )
-    if submission.get("attendance_status") == "absent_late":
+    """Build one bilingual message for each final attendance outcome."""
+    status = submission.get("attendance_status")
+    if submission.get("verdict") == "flagged" and submission.get("review_status") not in {"approved", "rejected"}:
+        return build_reply_message("flagged", submission.get("employee_name"), submission.get("issues") or [])
+    if submission.get("review_status") == "approved":
+        return "✅ Attendance marked Present after review.\n✅ तपासणीनंतर उपस्थिती उपस्थित म्हणून नोंदवली आहे."
+    if submission.get("review_status") == "rejected":
+        return "⚠️ Attendance marked Absent after review.\n⚠️ तपासणीनंतर उपस्थिती अनुपस्थित म्हणून नोंदवली आहे."
+    if status in {"absent_late", "absent"}:
         return (
-            "⚠️ Your attendance is marked Absent due to late check-in. "
-            "Your photo time is outside the allowed check-in period. "
-            "Please contact your supervisor if you need a review."
+            "⚠️ Your attendance is marked Absent due to late check-in. Your photo time is outside the allowed check-in period. Please contact your supervisor if you need a review.\n"
+            "⚠️ उशिरा हजेरी पाठवल्यामुळे तुमची उपस्थिती अनुपस्थित नोंदवली आहे. फोटोवरील वेळ मान्य कालावधीबाहेर आहे. तपासणीसाठी पर्यवेक्षकाशी संपर्क साधा."
         )
+    if status == "late":
+        return "🕒 Your attendance is marked Late.\n🕒 तुमची उपस्थिती उशिरा म्हणून नोंदवली आहे."
+    if status == "present" or submission.get("verdict") == "verified":
+        return build_reply_message("verified", submission.get("employee_name"), [], submission.get("previous_flagged_attempts"))
     return None
