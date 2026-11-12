@@ -40,10 +40,12 @@ export interface Employee {
   geofence_radius_km: number;
   shift_start: string | null;
   shift_end: string | null;
+  shift_allowed_minutes: number | null;
   shift_grace_minutes: number | null;
 }
 
-export type AttendanceRole = 'FS' | 'LS' | 'LSS';
+export type AttendanceRole = 'PC' | 'FS' | 'LS' | 'LSS';
+export type AttendancePersonRole = AttendanceRole;
 
 export interface AttendanceGridRow {
   employee_id: string;
@@ -77,13 +79,13 @@ export type Verdict = 'verified' | 'flagged' | 'inactive_account';
 
 export type ReviewStatus = 'n/a' | 'pending' | 'approved' | 'rejected';
 
-export type EntryType = 'whatsapp' | 'manual' | 'system';
+export type EntryType = 'whatsapp' | 'manual' | 'system' | 'coordinator_manual';
 
 export interface AttendanceRecord {
   _id: string;
   employee_id: string;
   employee_name?: string | null;
-  person_role?: AttendanceRole | null;
+  person_role?: AttendancePersonRole | null;
   sender_phone: string | null;
   caption: string | null;
   media_url: string | null;
@@ -101,6 +103,8 @@ export interface AttendanceRecord {
   photo_date?: string;
   photo_timestamp?: string;
   attendance_code?: string;
+  status_change_reason?: string | null;
+  resolution_reason?: string | null;
   check_in_at_ist?: string | null;
   geofence_display?: string;
   location_match_status?: 'disabled' | 'in_range' | 'in_area' | 'out_of_area' | 'unavailable' | null;
@@ -110,7 +114,7 @@ export interface AttendanceRecord {
   expected_city?: string | null;
   expected_district?: string | null;
   review_display?: string;
-  attendance_status: 'present' | 'absent' | 'pending' | 'late' | 'absent_late' | null;
+  attendance_status: 'present' | 'absent' | 'pending' | 'late' | 'absent_late' | 'week_off' | 'holiday' | null;
   flag_reason: string | null;
   verdict: Verdict;
   review_status: ReviewStatus;

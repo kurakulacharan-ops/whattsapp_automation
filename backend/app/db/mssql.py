@@ -34,6 +34,7 @@ COLLECTIONS = (
     "webhook_events",
     "notifications",
     "attendance_overrides",
+    "attendance_calendar",
     "admin_state",
 )
 INDEXED_FIELDS = {
@@ -41,13 +42,15 @@ INDEXED_FIELDS = {
     "coordinators": {"pc_id"},
     "submissions": {
         "employee_id", "attendance_date", "image_hash", "event_id",
-        "review_status", "person_role", "received_at_utc",
+        "review_status", "person_role", "received_at_utc", "attendance_status", "entry_type",
+        "area",
     },
     "face_embeddings": {"employee_id"},
     "admin_users": {"username"},
     "webhook_events": {"event_id"},
     "notifications": {"notification_id", "status"},
     "attendance_overrides": {"employee_id", "attendance_date"},
+    "attendance_calendar": {"event_date"},
 }
 SPARSE_UNIQUE_FIELDS = {("submissions", "event_id")}
 _engine: AsyncEngine | None = None
@@ -786,11 +789,15 @@ async def ensure_indexes() -> None:
     await db.submissions.create_index("review_status")
     await db.submissions.create_index("person_role")
     await db.submissions.create_index("received_at_utc")
+    await db.submissions.create_index("attendance_status")
+    await db.submissions.create_index("entry_type")
+    await db.submissions.create_index("area")
     await db.notifications.create_index("notification_id", unique=True)
     await db.notifications.create_index("status")
     await db.attendance_overrides.create_index(
         [("employee_id", 1), ("attendance_date", 1)], unique=True
     )
+    await db.attendance_calendar.create_index("event_date", unique=True, sparse=True)
 
 
 async def close() -> None:

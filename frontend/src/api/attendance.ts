@@ -1,11 +1,15 @@
 import axios from 'axios';
 import { apiClient } from './client';
-import type { AttendanceGrid, AttendanceRole, AttendanceRecord, PageMeta, Verdict } from '../types';
+import type { AttendanceGrid, AttendancePersonRole, AttendanceRole, AttendanceRecord, PageMeta, Verdict } from '../types';
 
 export interface AttendanceListParams {
   employee_id?: string;
   pc_id?: string;
   verdict?: Verdict;
+  area?: string;
+  role?: AttendancePersonRole;
+  attendance_status?: 'present' | 'late' | 'absent' | 'flagged';
+  include_coordinator_attendance?: boolean;
   date_from?: string; // YYYY-MM-DD
   date_to?: string;
   page?: number;
@@ -20,6 +24,56 @@ export interface AttendanceListResult extends PageMeta {
 export async function listAttendance(params?: AttendanceListParams) {
   const { data } = await apiClient.get<AttendanceListResult>('/attendance', { params });
   return data;
+}
+
+export async function listCoordinatorAttendance(params: {
+  pc_id?: string; date_from?: string; date_to?: string;
+  attendance_status?: 'present' | 'absent' | 'week_off' | 'holiday'; search?: string;
+  page?: number; page_size?: number;
+}) {
+  const { data } = await apiClient.get<AttendanceListResult>('/attendance/coordinators', { params });
+  return data;
+}
+
+export async function initializeCoordinatorAttendanceDefaults(date: string) {
+  const { data } = await apiClient.post<{ initialized: number }>(
+    '/attendance/coordinators/defaults', { date }
+  );
+  return data;
+}
+
+export async function saveCoordinatorAttendance(payload: {
+  pc_id: string; date: string; attendance_code: 'P' | 'A' | 'WO' | 'H'; reason?: string;
+}) {
+  const { data } = await apiClient.post<AttendanceRecord>('/attendance/coordinators', payload);
+  return data;
+}
+
+export type AttendanceCalendarEvent = {
+  event_date: string;
+  kind: 'holiday' | 'weekoff' | 'other' | 'working_day';
+  name: string;
+  created_by?: string;
+  updated_by?: string;
+  updated_at_utc?: string;
+};
+
+export async function getAttendanceCalendar(month: number, year: number) {
+  const { data } = await apiClient.get<{ month: number; year: number; events: AttendanceCalendarEvent[] }>(
+    '/attendance/calendar', { params: { month, year } }
+  );
+  return data;
+}
+
+export async function saveCalendarEvent(event: AttendanceCalendarEvent) {
+  const { data } = await apiClient.put<AttendanceCalendarEvent>(
+    '/attendance/calendar/events', { date: event.event_date, kind: event.kind, name: event.name }
+  );
+  return data;
+}
+
+export async function deleteCalendarEvent(date: string) {
+  await apiClient.delete(`/attendance/calendar/events/${date}`);
 }
 
 export async function resolveAttendance(
@@ -125,6 +179,7 @@ export interface ExportParams {
   pc_id?: string;
   employee_id?: string;
   area?: string;
+  include_coordinator_attendance?: boolean;
 }
 
 // Excel export can't go through a normal fetch-and-parse call — it's a

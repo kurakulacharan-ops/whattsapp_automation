@@ -2,21 +2,29 @@
 Run this from one backend scheduler only to avoid duplicate inserts across replicas.
 """
 from datetime import datetime, timezone
+import logging
 from zoneinfo import ZoneInfo
 from app.db.database import (
     delete_system_absences_today,
     get_db,
     has_submission_today,
     list_attendance_people,
+    get_attendance_calendar_data,
 )
 from app.config import settings
+from app.services.attendance_calendar import calendar_codes_for_days
 
 IST = ZoneInfo('Asia/Kolkata')
+logger = logging.getLogger('absence_worker')
 
 async def finalize_absences():
     now = datetime.now(IST)
     today = now.date().isoformat()
     db = get_db()
+    calendar_data = await get_attendance_calendar_data(today, today)
+    if today in calendar_codes_for_days([today], calendar_data):
+        logger.info("Skipping automatic absences on non-working date %s", today)
+        return
     people, _ = await list_attendance_people(is_active=True, page_size=100_000)
     for person in people:
         end = person.shift_end or settings.shift_window_end

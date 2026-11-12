@@ -158,11 +158,13 @@ def check_passive_liveness(
         min(height, y2) - max(0, y1),
     )
 
-    face_ratio = (
-        face_width * face_height
-    ) / float(
-        width * height or 1
-    )
+    # Measure face height relative to the photo, rather than face-box area
+    # relative to photo area. Area disproportionately penalizes portrait
+    # images that contain GPS overlays or letterboxing, even when the face is
+    # large enough to inspect. The configured threshold is a fraction of the
+    # image height (for example 0.07 means 7%).
+    face_height_ratio = face_height / float(height or 1)
+    face_width_ratio = face_width / float(width or 1)
 
     # ---------------------------------------------------------
     # Image quality
@@ -187,13 +189,8 @@ def check_passive_liveness(
     # Face size
     # ---------------------------------------------------------
 
-    if (
-        face_ratio
-        < settings.liveness_min_face_ratio
-    ):
-        issues.append(
-            "face_too_small"
-        )
+    if face_height_ratio < settings.liveness_min_face_ratio:
+        issues.append("face_too_small")
 
     # ---------------------------------------------------------
     # Sharpness
@@ -231,9 +228,12 @@ def check_passive_liveness(
 
     metrics = {
         "face_ratio": round(
-            face_ratio,
+            face_height_ratio * face_width_ratio,
             4,
         ),
+        "face_percent": round(face_height_ratio * 100, 1),
+        "face_height_percent": round(face_height_ratio * 100, 1),
+        "face_width_percent": round(face_width_ratio * 100, 1),
         "sharpness": round(
             sharpness,
             2,

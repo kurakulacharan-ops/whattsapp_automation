@@ -347,6 +347,7 @@ async def process_attendance_submission(
             employee_shift_end=roster_entry.shift_end if roster_entry else None,
             employee_grace_minutes=roster_entry.shift_grace_minutes if roster_entry else None,
             employee_role=roster_entry.role if roster_entry else None,
+            employee_allowed_minutes=roster_entry.shift_allowed_minutes if roster_entry else None,
         )
         if shift_status not in NON_FAILURE_STATUSES:
             issues.append(f"shift_{shift_status}")
